@@ -111,7 +111,7 @@ class App(QMainWindow):
         if hasattr(self.miel, 'rowScores') and self.miel.rowScores:
             best = self.miel.rowScores[0]
             if best > 0:
-                msg += '  |  Mejor puntaje de fila (solución 1): ' + str(best) + ' tambores en misma fila'
+                msg += '  |  Mejor puntaje de posición (solución 1): ' + str(best) + ' tambores en misma columna'
         self.statusBar().showMessage(msg)
         self.miel.saveResultsToExcelDir(".." + os.sep + "results.xlsx")
 

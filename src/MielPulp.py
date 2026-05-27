@@ -38,22 +38,30 @@ class MielPulp:
     def getDataJson(self):
         return self.data.to_json()
 
+    def _positionColumn(self):
+        """Devuelve el nombre de la columna de posición si existe, o None."""
+        for name in ["Columna", "Fila"]:
+            if name in self.data.columns:
+                return name
+        return None
+
     def computeRowScore(self, x_vals, y_vals):
-        """Calcula cuántos tambores comparten fila con otro en el mismo lote.
+        """Calcula cuántos tambores comparten columna con otro en el mismo lote.
         Mayor puntaje = menos movimiento = mejor solución de posición."""
-        if "Fila" not in self.data.columns:
+        col = self._positionColumn()
+        if col is None:
             return 0
         LOTES = range(0, self.cntLotes)
         MUESTRAS = range(0, self.cntMuestras)
-        filas = list(self.data["Fila"])
+        posiciones = list(self.data[col])
         bonus = 0
         for l in LOTES:
             if x_vals[l]:
                 samples_in_batch = [m for m in MUESTRAS if y_vals[m][l]]
                 if samples_in_batch:
-                    rows_used = len(set(filas[m] for m in samples_in_batch))
-                    # tambores en mismo lote menos filas distintas = ahorro de movimiento
-                    bonus += len(samples_in_batch) - rows_used
+                    cols_used = len(set(posiciones[m] for m in samples_in_batch))
+                    # tambores en lote menos columnas distintas = ahorro de movimiento
+                    bonus += len(samples_in_batch) - cols_used
         return bonus
 
     def addResult(self, x, y):
@@ -135,8 +143,8 @@ class MielPulp:
                 else:
                     break
 
-        # Si hay columna Fila, ordenar soluciones por menor movimiento (mayor puntaje de fila)
-        if "Fila" in self.data.columns and self.results:
+        # Si hay columna de posición, ordenar soluciones por menor movimiento
+        if self._positionColumn() is not None and self.results:
             self.results.sort(key=lambda r: -self.computeRowScore(r[0], r[1]))
 
         self.rowScores = [self.computeRowScore(r[0], r[1]) for r in self.results]
@@ -155,10 +163,10 @@ class MielPulp:
         colLabelsMuestras = ["Lote " + str(num) for num in range(1, self.cntLotes + 1)]
         rowLabelsLotes = colLabelsMuestras
 
-        has_fila = "Fila" in self.data.columns
+        pos_col = self._positionColumn()
 
-        # columnas para LotesValores: propiedades + filas utilizadas si corresponde
-        colLabelsLotes = self.boundsLabels + (["Filas utilizadas"] if has_fila else [])
+        # columnas para LotesValores: propiedades + columnas utilizadas si corresponde
+        colLabelsLotes = self.boundsLabels + (["Columnas utilizadas"] if pos_col else [])
         cntParametros = len(colLabelsLotes)
 
         write = pd.ExcelWriter(dirToSave)
@@ -168,15 +176,15 @@ class MielPulp:
 
             matrizLoVal = np.zeros((self.cntLotes, cntParametros))
 
-            # matriz de muestras vs lotes (con columna Fila si existe)
+            # matriz de muestras vs lotes (con columna de posición si existe)
             muestra_data = {}
             for im, muestra_name in enumerate(rowLabelsMuestras):
                 row_data = [y[im][l] for l in LOTES]
-                if has_fila:
-                    row_data.append(self.data["Fila"].iloc[im])
+                if pos_col:
+                    row_data.append(self.data[pos_col].iloc[im])
                 muestra_data[muestra_name] = row_data
 
-            col_labels_mu = colLabelsMuestras + (["Fila"] if has_fila else [])
+            col_labels_mu = colLabelsMuestras + ([pos_col] if pos_col else [])
             matrizMuLo = pd.DataFrame.from_dict(muestra_data, orient="index", columns=col_labels_mu)
 
             for il, l in enumerate(LOTES):
@@ -186,10 +194,10 @@ class MielPulp:
                     for ip, p in enumerate(self.boundsLabels[1::]):
                         valorProp = sum([self.data[p][m] * y[m][l] * self.data["Kilos"][m] for m in MUESTRAS]) / kilosLote
                         matrizLoVal[il, ip + 1] = valorProp
-                    if has_fila:
+                    if pos_col:
                         samples_in_batch = [m for m in MUESTRAS if y[m][l]]
-                        rows_used = len(set(self.data["Fila"].iloc[m] for m in samples_in_batch))
-                        matrizLoVal[il, len(self.boundsLabels)] = rows_used
+                        cols_used = len(set(self.data[pos_col].iloc[m] for m in samples_in_batch))
+                        matrizLoVal[il, len(self.boundsLabels)] = cols_used
 
             matrizLoVal_dict = dict(zip(rowLabelsLotes, np.round(matrizLoVal, 4)))
             matrizLoVal_df = pd.DataFrame.from_dict(matrizLoVal_dict, orient="index", columns=colLabelsLotes)
