@@ -103,6 +103,11 @@ class App(QMainWindow):
         self.saveResults()
     
     def saveResults(self):
-        self.statusBar().showMessage('Cantidad de soluciones optimas obtenidas: '+str(self.optimals))
+        msg = 'Soluciones óptimas: ' + str(self.optimals)
+        if hasattr(self.miel, 'rowScores') and self.miel.rowScores:
+            best = self.miel.rowScores[0]
+            if best > 0:
+                msg += '  |  Mejor puntaje de fila (solución 1): ' + str(best) + ' tambores en misma fila'
+        self.statusBar().showMessage(msg)
         self.miel.saveResultsToExcelDir(".." + os.sep + "results.xlsx")
 
