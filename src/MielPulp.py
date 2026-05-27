@@ -205,4 +205,4 @@ class MielPulp:
             matrizMuLo.to_excel(write, sheet_name="MuestrasLotes_" + str(i + 1))
             matrizLoVal_df.to_excel(write, sheet_name="LotesValores_" + str(i + 1))
 
-        write.save()
+        write.close()
