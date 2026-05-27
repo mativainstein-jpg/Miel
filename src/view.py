@@ -93,9 +93,13 @@ class App(QMainWindow):
     def processMiel(self):
         sep = os.sep
         self.miel.setBoundsFromDir(".." + sep + "bounds.xlsx", "excel")
-        cwd = os.getcwd()
-        solveDirTemp = ".." + sep + "Cbc-2.7.5-win64" + sep + "bin" + sep + "cbc.exe"  # extracted and renamed CBC solver binary
-        solveDir = os.path.join(cwd, solveDirTemp)
+        import platform
+        if platform.system() == "Windows":
+            cwd = os.getcwd()
+            solveDirTemp = ".." + sep + "Cbc-2.7.5-win64" + sep + "bin" + sep + "cbc.exe"
+            solveDir = os.path.join(cwd, solveDirTemp)
+        else:
+            solveDir = ""
 
         self.optimals = self.miel.processModel(solveDir)
         #self.statusBar().showMessage('Procesando...')
