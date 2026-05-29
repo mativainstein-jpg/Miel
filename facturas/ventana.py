@@ -1,16 +1,17 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
-    QHBoxLayout, QLabel, QMainWindow, QProgressBar,
+    QFileDialog, QHBoxLayout, QLabel, QMainWindow, QProgressBar,
     QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from config import EXCEL_FACTURAS
-from procesador import ProcesadorWorker
+from procesador import ProcesadorGmailWorker, ProcesadorLocalWorker
 
 
 class VentanaFacturas(QMainWindow):
@@ -45,11 +46,19 @@ class VentanaFacturas(QMainWindow):
 
         botones = QHBoxLayout()
 
-        self.btn_procesar = QPushButton('📥  Procesar Facturas')
-        self.btn_procesar.setMinimumHeight(38)
-        self.btn_procesar.setFont(QFont('Arial', 10))
-        self.btn_procesar.clicked.connect(self._procesar)
-        botones.addWidget(self.btn_procesar)
+        self.btn_gmail = QPushButton('📧  Buscar en Gmail')
+        self.btn_gmail.setMinimumHeight(38)
+        self.btn_gmail.setFont(QFont('Arial', 10))
+        self.btn_gmail.setToolTip('Busca PDFs nuevos en Gmail, los procesa y etiqueta los ya procesados')
+        self.btn_gmail.clicked.connect(self._procesar_gmail)
+        botones.addWidget(self.btn_gmail)
+
+        self.btn_local = QPushButton('📄  Insertar Factura')
+        self.btn_local.setMinimumHeight(38)
+        self.btn_local.setFont(QFont('Arial', 10))
+        self.btn_local.setToolTip('Seleccioná uno o más PDFs locales para procesar')
+        self.btn_local.clicked.connect(self._insertar_local)
+        botones.addWidget(self.btn_local)
 
         self.btn_excel = QPushButton('📊  Abrir Excel')
         self.btn_excel.setMinimumHeight(38)
@@ -67,13 +76,36 @@ class VentanaFacturas(QMainWindow):
 
     # ------------------------------------------------------------------
 
-    def _procesar(self):
-        self.btn_procesar.setEnabled(False)
+    def _bloquear(self):
+        self.btn_gmail.setEnabled(False)
+        self.btn_local.setEnabled(False)
         self.barra.setValue(0)
         self.barra.setVisible(True)
         self._log('─' * 55)
 
-        self.worker = ProcesadorWorker()
+    def _desbloquear(self):
+        self.btn_gmail.setEnabled(True)
+        self.btn_local.setEnabled(True)
+        self.barra.setVisible(False)
+
+    def _procesar_gmail(self):
+        self._bloquear()
+        self.worker = ProcesadorGmailWorker()
+        self.worker.log.connect(self._log)
+        self.worker.progreso.connect(self._progreso)
+        self.worker.terminado.connect(self._finalizado)
+        self.worker.error_critico.connect(self._error_critico)
+        self.worker.start()
+
+    def _insertar_local(self):
+        rutas, _ = QFileDialog.getOpenFileNames(
+            self, 'Seleccionar facturas PDF', '', 'Archivos PDF (*.pdf)'
+        )
+        if not rutas:
+            return
+
+        self._bloquear()
+        self.worker = ProcesadorLocalWorker([Path(r) for r in rutas])
         self.worker.log.connect(self._log)
         self.worker.progreso.connect(self._progreso)
         self.worker.terminado.connect(self._finalizado)
@@ -90,8 +122,7 @@ class VentanaFacturas(QMainWindow):
         self.barra.setValue(actual)
 
     def _finalizado(self, resumen):
-        self.btn_procesar.setEnabled(True)
-        self.barra.setVisible(False)
+        self._desbloquear()
         self._log('─' * 55)
         self._log(
             f'✅  Listo — '
@@ -101,8 +132,7 @@ class VentanaFacturas(QMainWindow):
         )
 
     def _error_critico(self, mensaje):
-        self.btn_procesar.setEnabled(True)
-        self.barra.setVisible(False)
+        self._desbloquear()
         self._log(f'❌  ERROR CRÍTICO:\n{mensaje}')
 
     def _abrir_excel(self):

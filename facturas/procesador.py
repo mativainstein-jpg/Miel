@@ -6,7 +6,7 @@ from excel_manager import ExcelManager, cargar_indice_proveedores
 from config import JSON_ESTADO, LABEL_PROCESADO
 
 
-class ProcesadorWorker(QThread):
+class ProcesadorGmailWorker(QThread):
     log       = pyqtSignal(str)
     progreso  = pyqtSignal(int, int)
     terminado = pyqtSignal(dict)
@@ -111,6 +111,88 @@ class ProcesadorWorker(QThread):
                 aplicar_label(service, tid, LABEL_PROCESADO)
             except Exception as e:
                 self.log.emit(f'  ⚠ No se pudo aplicar label al thread: {e}')
+
+        self.terminado.emit({'ok': ok, 'duplicados': duplicados, 'errores': errores})
+
+
+# ---------------------------------------------------------------------------
+# Worker para PDFs locales (sin Gmail)
+# ---------------------------------------------------------------------------
+
+class ProcesadorLocalWorker(QThread):
+    log       = pyqtSignal(str)
+    progreso  = pyqtSignal(int, int)
+    terminado = pyqtSignal(dict)
+    error_critico = pyqtSignal(str)
+
+    def __init__(self, rutas):
+        super().__init__()
+        self.rutas = rutas  # list of Path objects
+
+    def run(self):
+        try:
+            self._ejecutar()
+        except Exception as e:
+            self.error_critico.emit(str(e))
+
+    def _ejecutar(self):
+        indice_proveedores = cargar_indice_proveedores()
+        excel = ExcelManager()
+        indice_duplicados = excel.cargar_indice_duplicados()
+
+        ok = duplicados = errores = 0
+        total = len(self.rutas)
+
+        try:
+            for i, ruta in enumerate(self.rutas):
+                self.progreso.emit(i + 1, total)
+                self.log.emit(f'[{i+1}/{total}] {ruta.name}')
+
+                try:
+                    pdf_bytes = ruta.read_bytes()
+                    texto = extraer_texto(pdf_bytes)
+
+                    if not es_texto_valido(texto):
+                        self.log.emit(f'  ⚠ Tipo no reconocido o texto insuficiente')
+                        excel.registrar_error(ruta.name, 'Texto PDF insuficiente o tipo no reconocido')
+                        errores += 1
+                        continue
+
+                    datos = parsear_factura(texto, ruta.name, indice_proveedores)
+
+                    if datos['clave'] in indice_duplicados['claves']:
+                        excel.registrar_duplicado(ruta.name, datos['clave'],
+                                                  'Duplicado por clave comprobante', '')
+                        duplicados += 1
+                        self.log.emit(f'  ↩ Duplicada: {datos["clave"]}')
+                        continue
+
+                    if ruta.name in indice_duplicados['nombres']:
+                        excel.registrar_duplicado(ruta.name, datos['clave'],
+                                                  'Duplicado por nombre adjunto', '')
+                        duplicados += 1
+                        self.log.emit(f'  ↩ Duplicada (nombre): {ruta.name}')
+                        continue
+
+                    cols_verificar = excel.escribir_factura(datos)
+                    indice_duplicados['nombres'].add(ruta.name)
+                    indice_duplicados['claves'].add(datos['clave'])
+                    ok += 1
+
+                    if cols_verificar:
+                        self.log.emit(f'  ✓ OK (revisar col. {cols_verificar}): '
+                                      f'{datos["tipo"]} PV {datos["punto_venta"]} N° {datos["numero"]}')
+                    else:
+                        self.log.emit(f'  ✓ OK: {datos["tipo"]} PV {datos["punto_venta"]} N° {datos["numero"]}')
+
+                except Exception as e:
+                    errores += 1
+                    self.log.emit(f'  ✗ Error: {e}')
+                    excel.registrar_error(ruta.name, str(e))
+
+        finally:
+            excel.guardar()
+            excel.cerrar()
 
         self.terminado.emit({'ok': ok, 'duplicados': duplicados, 'errores': errores})
 
