@@ -120,9 +120,14 @@ class ProcesadorGmailWorker(QThread):
 # ---------------------------------------------------------------------------
 
 class ProcesadorLocalWorker(QThread):
-    log       = pyqtSignal(str)
-    progreso  = pyqtSignal(int, int)
-    terminado = pyqtSignal(dict)
+    """
+    Parses PDFs and emits a `preview` signal with the results.
+    Does NOT write to Excel — writing happens on the main thread after
+    the user confirms the preview dialog.
+    """
+    log          = pyqtSignal(str)
+    progreso     = pyqtSignal(int, int)
+    preview      = pyqtSignal(list)   # list of result dicts
     error_critico = pyqtSignal(str)
 
     def __init__(self, rutas):
@@ -137,64 +142,87 @@ class ProcesadorLocalWorker(QThread):
 
     def _ejecutar(self):
         indice_proveedores = cargar_indice_proveedores()
+
+        # Read duplicate indices without keeping workbook open
         excel = ExcelManager()
         indice_duplicados = excel.cargar_indice_duplicados()
+        excel.cerrar()
 
-        ok = duplicados = errores = 0
         total = len(self.rutas)
+        resultados = []
 
-        try:
-            for i, ruta in enumerate(self.rutas):
-                self.progreso.emit(i + 1, total)
-                self.log.emit(f'[{i+1}/{total}] {ruta.name}')
+        for i, ruta in enumerate(self.rutas):
+            self.progreso.emit(i + 1, total)
+            self.log.emit(f'[{i+1}/{total}] Leyendo {ruta.name}...')
 
-                try:
-                    pdf_bytes = ruta.read_bytes()
-                    texto = extraer_texto(pdf_bytes)
+            entry = {
+                'ruta':       ruta,
+                'filename':   ruta.name,
+                'datos':      None,
+                'error':      None,
+                'dup_clave':  False,
+                'dup_nombre': False,
+            }
+            try:
+                pdf_bytes = ruta.read_bytes()
+                texto = extraer_texto(pdf_bytes)
 
-                    if not es_texto_valido(texto):
-                        self.log.emit(f'  ⚠ Tipo no reconocido o texto insuficiente')
-                        excel.registrar_error(ruta.name, 'Texto PDF insuficiente o tipo no reconocido')
-                        errores += 1
-                        continue
+                if not es_texto_valido(texto):
+                    entry['error'] = 'Texto PDF insuficiente o tipo no reconocido'
+                else:
+                    dados = parsear_factura(texto, ruta.name, indice_proveedores, pdf_bytes=pdf_bytes)
+                    entry['datos']      = dados
+                    entry['dup_clave']  = dados['clave'] in indice_duplicados['claves']
+                    entry['dup_nombre'] = ruta.name in indice_duplicados['nombres']
+            except Exception as e:
+                entry['error'] = str(e)
 
-                    datos = parsear_factura(texto, ruta.name, indice_proveedores, pdf_bytes=pdf_bytes)
+            resultados.append(entry)
 
-                    if datos['clave'] in indice_duplicados['claves']:
-                        excel.registrar_duplicado(ruta.name, datos['clave'],
-                                                  'Duplicado por clave comprobante', '')
-                        duplicados += 1
-                        self.log.emit(f'  ↩ Duplicada: {datos["clave"]}')
-                        continue
+        self.preview.emit(resultados)
 
-                    if ruta.name in indice_duplicados['nombres']:
-                        excel.registrar_duplicado(ruta.name, datos['clave'],
-                                                  'Duplicado por nombre adjunto', '')
-                        duplicados += 1
-                        self.log.emit(f'  ↩ Duplicada (nombre): {ruta.name}')
-                        continue
 
-                    cols_verificar = excel.escribir_factura(datos)
-                    indice_duplicados['nombres'].add(ruta.name)
-                    indice_duplicados['claves'].add(datos['clave'])
-                    ok += 1
+def escribir_resultados_en_excel(resultados):
+    """
+    Write pre-parsed results to Excel. Called from the main thread after
+    the user confirms the preview dialog.
+    Returns {'ok': int, 'duplicados': int, 'errores': int}.
+    """
+    excel = ExcelManager()
+    indice_duplicados = excel.cargar_indice_duplicados()
 
-                    if cols_verificar:
-                        self.log.emit(f'  ✓ OK (revisar col. {cols_verificar}): '
-                                      f'{datos["tipo"]} PV {datos["punto_venta"]} N° {datos["numero"]}')
-                    else:
-                        self.log.emit(f'  ✓ OK: {datos["tipo"]} PV {datos["punto_venta"]} N° {datos["numero"]}')
+    ok = duplicados = errores = 0
 
-                except Exception as e:
-                    errores += 1
-                    self.log.emit(f'  ✗ Error: {e}')
-                    excel.registrar_error(ruta.name, str(e))
+    try:
+        for r in resultados:
+            datos = r['datos']
 
-        finally:
-            excel.guardar()
-            excel.cerrar()
+            if r['error']:
+                excel.registrar_error(r['filename'], r['error'])
+                errores += 1
+                continue
 
-        self.terminado.emit({'ok': ok, 'duplicados': duplicados, 'errores': errores})
+            # Re-check duplicates in case the index changed since parsing
+            dup_clave  = r['dup_clave']  or datos['clave']    in indice_duplicados['claves']
+            dup_nombre = r['dup_nombre'] or r['filename'] in indice_duplicados['nombres']
+
+            if dup_clave or dup_nombre:
+                razon = ('Duplicado por clave comprobante' if dup_clave
+                         else 'Duplicado por nombre adjunto')
+                excel.registrar_duplicado(r['filename'], datos['clave'], razon, '')
+                duplicados += 1
+                continue
+
+            excel.escribir_factura(datos)
+            indice_duplicados['nombres'].add(r['filename'])
+            indice_duplicados['claves'].add(datos['clave'])
+            ok += 1
+
+    finally:
+        excel.guardar()
+        excel.cerrar()
+
+    return {'ok': ok, 'duplicados': duplicados, 'errores': errores}
 
 
 # ---------------------------------------------------------------------------
