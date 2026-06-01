@@ -40,28 +40,34 @@ class MielPulp:
 
     def _positionColumn(self):
         """Devuelve el nombre de la columna de posición si existe, o None."""
-        for name in ["Columna", "Fila"]:
+        for name in ["Columnas", "Columna", "Fila"]:
             if name in self.data.columns:
                 return name
         return None
 
+    def _parseColumnas(self, valor):
+        """Parsea '5' o '5,12' en un set de columnas."""
+        return set(str(valor).replace(" ", "").split(","))
+
     def computeRowScore(self, x_vals, y_vals):
-        """Calcula cuántos tambores comparten columna con otro en el mismo lote.
-        Mayor puntaje = menos movimiento = mejor solución de posición."""
+        """Calcula el ahorro de movimiento por columnas compartidas en cada lote.
+        Mayor puntaje = menos visitas a columnas distintas = mejor solución."""
         col = self._positionColumn()
         if col is None:
             return 0
         LOTES = range(0, self.cntLotes)
         MUESTRAS = range(0, self.cntMuestras)
-        posiciones = list(self.data[col])
+        columnas_por_sublote = [self._parseColumnas(self.data[col].iloc[m]) for m in MUESTRAS]
         bonus = 0
         for l in LOTES:
             if x_vals[l]:
                 samples_in_batch = [m for m in MUESTRAS if y_vals[m][l]]
                 if samples_in_batch:
-                    cols_used = len(set(posiciones[m] for m in samples_in_batch))
-                    # tambores en lote menos columnas distintas = ahorro de movimiento
-                    bonus += len(samples_in_batch) - cols_used
+                    # unión de todas las columnas usadas en el lote
+                    cols_del_lote = set().union(*[columnas_por_sublote[m] for m in samples_in_batch])
+                    # total de columnas individuales menos columnas distintas = ahorro
+                    total_cols = sum(len(columnas_por_sublote[m]) for m in samples_in_batch)
+                    bonus += total_cols - len(cols_del_lote)
         return bonus
 
     def addResult(self, x, y):
@@ -196,8 +202,8 @@ class MielPulp:
                         matrizLoVal[il, ip + 1] = valorProp
                     if pos_col:
                         samples_in_batch = [m for m in MUESTRAS if y[m][l]]
-                        cols_used = len(set(self.data[pos_col].iloc[m] for m in samples_in_batch))
-                        matrizLoVal[il, len(self.boundsLabels)] = cols_used
+                        cols_del_lote = set().union(*[self._parseColumnas(self.data[pos_col].iloc[m]) for m in samples_in_batch])
+                        matrizLoVal[il, len(self.boundsLabels)] = len(cols_del_lote)
 
             matrizLoVal_dict = dict(zip(rowLabelsLotes, np.round(matrizLoVal, 4)))
             matrizLoVal_df = pd.DataFrame.from_dict(matrizLoVal_dict, orient="index", columns=colLabelsLotes)
