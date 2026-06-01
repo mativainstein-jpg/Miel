@@ -22,13 +22,13 @@ def es_texto_valido(texto):
 # Parser principal
 # ---------------------------------------------------------------------------
 
-def parsear_factura(texto, nombre_adjunto, indice_proveedores=None):
+def parsear_factura(texto, nombre_adjunto, indice_proveedores=None, pdf_bytes=None):
     tipo = _detectar_tipo(texto)
-    linea = _extraer_linea_producto(texto)
+    linea = _extraer_linea_producto(texto, pdf_bytes)
 
-    numero     = _campo(texto, r'Comp\.\s*Nro:\s*0*(\d+)')
+    numero      = _campo(texto, r'Comp\.\s*Nro:\s*0*(\d+)')
     punto_venta = _campo(texto, r'Punto\s*de\s*Venta:\s*0*(\d+)')
-    fecha      = _campo(texto, r'Fecha\s*de\s*Emisi[oó]n:\s*(\d{2}/\d{2}/\d{4})')
+    fecha       = _campo(texto, r'Fecha\s*de\s*Emisi[oó]n:\s*(\d{2}/\d{2}/\d{4})')
 
     denominacion_pdf = _extraer_denominacion(texto)
     cuit             = _extraer_cuit_emisor(texto)
@@ -46,15 +46,15 @@ def parsear_factura(texto, nombre_adjunto, indice_proveedores=None):
     if not total and tipo == 'FCC':
         total = _subtotal_linea(linea)
 
-    kilos          = _kilos_linea(linea)
-    precio_raw     = _precio_unitario_linea(linea) or _campo(texto, r'Precio\s*Unit\.?\s*([\d.,]+)')
+    kilos      = _kilos_linea(linea)
+    precio_raw = _precio_unitario_linea(linea) or _campo(texto, r'Precio\s*Unit\.?\s+([\d.,]+)')
 
-    kilos_num   = _num(kilos)
-    neto_num    = _num(neto)
+    kilos_num    = _num(kilos)
+    neto_num     = _num(neto)
     subtotal_num = _num(subtotal)
-    iva_num     = _num(iva105) + _num(iva21) + _num(iva27)
-    total_num   = _num(total)
-    precio_num  = _num(precio_raw)
+    iva_num      = _num(iva105) + _num(iva21) + _num(iva27)
+    total_num    = _num(total)
+    precio_num   = _num(precio_raw)
 
     if precio_num > 0:
         precio_unitario_num = precio_num
@@ -69,7 +69,7 @@ def parsear_factura(texto, nombre_adjunto, indice_proveedores=None):
     mes  = int(partes_fecha[1]) if len(partes_fecha) > 1 else None
     anio = int(partes_fecha[2]) if len(partes_fecha) > 2 else None
 
-    posicion      = 'RM' if tipo == 'FCC' else ('RI' if tipo == 'FCA' else '')
+    posicion       = 'RM' if tipo == 'FCC' else ('RI' if tipo == 'FCA' else '')
     monotributista = 'SI' if tipo == 'FCC' else ''
 
     clave = '|'.join([
@@ -80,78 +80,201 @@ def parsear_factura(texto, nombre_adjunto, indice_proveedores=None):
     ])
 
     return {
-        'tipo':              tipo,
-        'tipo_numero':       4,
-        'numero':            numero,
-        'punto_venta':       punto_venta,
-        'fecha':             fecha,
-        'denominacion':      denominacion,
-        'cuit':              cuit,
-        'neto_num':          0 if tipo == 'FCC' else neto_num,
-        'iva_num':           0 if tipo == 'FCC' else iva_num,
+        'tipo':               tipo,
+        'tipo_numero':        4,
+        'numero':             numero,
+        'punto_venta':        punto_venta,
+        'fecha':              fecha,
+        'denominacion':       denominacion,
+        'cuit':               cuit,
+        'neto_num':           0 if tipo == 'FCC' else neto_num,
+        'iva_num':            0 if tipo == 'FCC' else iva_num,
         'otros_tributos_num': _num(otros),
-        'kilos_num':         kilos_num,
+        'kilos_num':          kilos_num,
         'precio_unitario_num': precio_unitario_num,
-        'monotributista':    monotributista,
-        'total_num':         total_num,
-        'tasa':              0,
-        'gasto':             4,
-        'rubro':             6,
-        'mes':               mes,
-        'anio':              anio,
-        'codigo_operacion':  '',
-        'posicion':          posicion,
-        'descripcion_gasto': 'miel',
-        'descripcion_rubro': 'mercaderia',
-        'nombre_adjunto':    nombre_adjunto,
-        'clave':             clave,
+        'monotributista':     monotributista,
+        'total_num':          total_num,
+        'tasa':               0,
+        'gasto':              4,
+        'rubro':              6,
+        'mes':                mes,
+        'anio':               anio,
+        'codigo_operacion':   '',
+        'posicion':           posicion,
+        'descripcion_gasto':  'miel',
+        'descripcion_rubro':  'mercaderia',
+        'nombre_adjunto':     nombre_adjunto,
+        'clave':              clave,
     }
 
 
 # ---------------------------------------------------------------------------
-# Helpers de extracción
+# Extracción de línea de producto — cascada de 3 estrategias
 # ---------------------------------------------------------------------------
 
-def _detectar_tipo(texto):
-    if re.search(r'COD\.\s*0*11', texto, re.I):   return 'FCC'
-    if re.search(r'COD\.\s*0*1(?!1)', texto, re.I): return 'FCA'
-    return ''
+def _extraer_linea_producto(texto, pdf_bytes=None):
+    # 1. pdfplumber table extraction (best for structured AFIP tables)
+    if pdf_bytes:
+        result = _extraer_de_tablas(pdf_bytes)
+        if result:
+            return result
+
+    # 2. Single-line regex (works when pdfplumber reconstructs row layout)
+    result = _extraer_linea_single(texto)
+    if result:
+        return result
+
+    # 3. Multi-line anchor-based search (fallback for column-per-line layouts)
+    return _extraer_multilinea(texto)
 
 
-def _extraer_linea_producto(texto):
+def _extraer_de_tablas(pdf_bytes):
+    """Use pdfplumber table detection to find the product row."""
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                for table in (page.extract_tables() or []):
+                    for row in table:
+                        if not row:
+                            continue
+                        cells = [str(c).strip() if c else '' for c in row]
+                        row_str = ' '.join(cells)
+                        m = re.search(r'([\d.,]+)\s*(kg|kilos|unidad(?:es)?)', row_str, re.I)
+                        if not m:
+                            continue
+                        cantidad = m.group(1)
+                        raw_unit = m.group(2).lower()
+                        unidad   = 'kg' if 'kg' in raw_unit or 'kilo' in raw_unit else 'unidades'
+                        nums     = re.findall(r'[\d.,]+', row_str)
+                        # Last two numbers are typically unit price and line total
+                        precio   = nums[-2] if len(nums) >= 3 else (nums[-1] if len(nums) >= 2 else '')
+                        subtotal = nums[-1] if len(nums) >= 2 else ''
+                        return {
+                            'descripcion':     '',
+                            'cantidad':        cantidad,
+                            'unidad':          unidad,
+                            'precio_unitario': precio,
+                            'subtotal':        subtotal,
+                        }
+    except Exception:
+        pass
+    return None
+
+
+def _extraer_linea_single(texto):
+    """Single-line regex — works when pdfplumber merges table columns into one line."""
     for linea in texto.splitlines():
         linea = linea.strip()
 
         m = re.match(
-            r'(.+?)\s+([\d.,]+)\s+(kg|kilos|unidad|unidades)'
+            r'(.+?)\s+([\d.,]+)\s+(kg|kilos|unidad(?:es)?)'
             r'\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)%\s+([\d.,]+)',
             linea, re.I
         )
         if m:
             return {
-                'descripcion':   m.group(1).strip(),
-                'cantidad':      m.group(2),
-                'unidad':        m.group(3).lower(),
+                'descripcion':     m.group(1).strip(),
+                'cantidad':        m.group(2),
+                'unidad':          m.group(3).lower(),
                 'precio_unitario': m.group(4),
-                'subtotal':      m.group(6),
+                'subtotal':        m.group(6),
             }
 
         m = re.match(
-            r'(.+?)\s+([\d.,]+)\s+(kg|kilos|unidad|unidades)'
+            r'(.+?)\s+([\d.,]+)\s+(kg|kilos|unidad(?:es)?)'
             r'\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)',
             linea, re.I
         )
         if m:
             return {
-                'descripcion':   m.group(1).strip(),
-                'cantidad':      m.group(2),
-                'unidad':        m.group(3).lower(),
+                'descripcion':     m.group(1).strip(),
+                'cantidad':        m.group(2),
+                'unidad':          m.group(3).lower(),
                 'precio_unitario': m.group(4),
-                'subtotal':      m.group(7),
+                'subtotal':        m.group(7),
             }
 
     return None
 
+
+def _extraer_multilinea(texto):
+    """
+    Anchor-based fallback for PDFs where each table column appears on its own line.
+
+    Uses "Precio Unit." as anchor:
+      - scan BACKWARD → first standalone number = quantity
+      - scan FORWARD  → first standalone number = unit price
+
+    This handles both orderings found in the wild:
+      Layout A: quantity … "Precio Unit." … price  (BUZZATTO / ALASINO)
+      Layout B: quantity   "Precio Unit."   price   (LEFFLER)
+    """
+    lineas = [l.strip() for l in texto.splitlines()]
+
+    precio_unitario   = ''
+    cantidad          = ''
+    unidad_encontrada = 'kg'
+
+    # Find "Precio Unit." line
+    precio_idx = -1
+    for i, linea in enumerate(lineas):
+        m = re.match(r'^Precio\s*Unit\.?\s*([\d.,]+)?$', linea, re.I)
+        if m:
+            precio_idx = i
+            if m.group(1):
+                precio_unitario = m.group(1)
+            break
+
+    if precio_idx < 0:
+        return None
+
+    # Scan backward for quantity (skip labels, take first standalone number)
+    for j in range(precio_idx - 1, max(precio_idx - 15, -1), -1):
+        cand = lineas[j]
+        if re.match(r'^[\d.,]+$', cand) and _num(cand) > 0:
+            cantidad = cand
+            break
+
+    # Scan forward for price if not already on the same line
+    if not precio_unitario:
+        for j in range(precio_idx + 1, min(precio_idx + 8, len(lineas))):
+            if re.match(r'^[\d.,]+$', lineas[j]) and _num(lineas[j]) > 0:
+                precio_unitario = lineas[j]
+                break
+
+    # Detect unit (scan nearby lines for kg / unidades)
+    search_start = max(0, precio_idx - 15)
+    search_end   = min(len(lineas), precio_idx + 10)
+    for linea in lineas[search_start:search_end]:
+        if re.match(r'^(kg|kilos)$', linea, re.I):
+            unidad_encontrada = 'kg'
+            break
+        if re.match(r'^unidad(?:es)?$', linea, re.I):
+            unidad_encontrada = 'unidades'
+            break
+        m = re.search(r'([\d.,]+)\s+(kg|kilos|unidad(?:es)?)', linea, re.I)
+        if m:
+            raw = m.group(2).lower()
+            unidad_encontrada = 'kg' if 'kg' in raw or 'kilo' in raw else 'unidades'
+            if not cantidad:
+                cantidad = m.group(1)
+            break
+
+    if not cantidad and not precio_unitario:
+        return None
+
+    return {
+        'descripcion':     '',
+        'cantidad':        cantidad,
+        'unidad':          unidad_encontrada,
+        'precio_unitario': precio_unitario,
+        'subtotal':        '',
+    }
+
+
+# ---------------------------------------------------------------------------
+# Helpers secundarios
+# ---------------------------------------------------------------------------
 
 def _kilos_linea(linea):
     if not linea:
@@ -165,6 +288,12 @@ def _precio_unitario_linea(linea):
 
 def _subtotal_linea(linea):
     return linea['subtotal'] if linea else ''
+
+
+def _detectar_tipo(texto):
+    if re.search(r'COD\.\s*0*11', texto, re.I):      return 'FCC'
+    if re.search(r'COD\.\s*0*1(?!1)', texto, re.I):  return 'FCA'
+    return ''
 
 
 def _extraer_denominacion(texto):
@@ -245,7 +374,7 @@ def _limpiar_texto(texto):
     if not texto:
         return ''
     texto = re.sub(r'\s+', ' ', str(texto))
-    texto = re.sub(r'CUIT.*',        '', texto, flags=re.I)
-    texto = re.sub(r'Condici[oó]n.*','', texto, flags=re.I)
-    texto = re.sub(r'Domicilio.*',   '', texto, flags=re.I)
+    texto = re.sub(r'CUIT.*',         '', texto, flags=re.I)
+    texto = re.sub(r'Condici[oó]n.*', '', texto, flags=re.I)
+    texto = re.sub(r'Domicilio.*',    '', texto, flags=re.I)
     return texto.strip()

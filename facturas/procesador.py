@@ -61,7 +61,7 @@ class ProcesadorGmailWorker(QThread):
                         errores += 1
                         continue
 
-                    datos = parsear_factura(texto, item['filename'], indice_proveedores)
+                    datos = parsear_factura(texto, item['filename'], indice_proveedores, pdf_bytes=pdf_bytes)
 
                     if datos['clave'] in indice_duplicados['claves']:
                         excel.registrar_duplicado(item['filename'], datos['clave'],
@@ -158,7 +158,7 @@ class ProcesadorLocalWorker(QThread):
                         errores += 1
                         continue
 
-                    datos = parsear_factura(texto, ruta.name, indice_proveedores)
+                    datos = parsear_factura(texto, ruta.name, indice_proveedores, pdf_bytes=pdf_bytes)
 
                     if datos['clave'] in indice_duplicados['claves']:
                         excel.registrar_duplicado(ruta.name, datos['clave'],
