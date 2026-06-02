@@ -18,8 +18,8 @@ if errorlevel 1 (
 
 REM Instalar dependencias + PyInstaller
 echo  [1/3] Instalando dependencias...
-pip install -r requirements.txt >nul 2>&1
-pip install pyinstaller >nul 2>&1
+python -m pip install -r requirements.txt >nul 2>&1
+python -m pip install pyinstaller >nul 2>&1
 echo       OK
 
 REM Limpiar compilaciones anteriores

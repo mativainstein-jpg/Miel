@@ -28,7 +28,7 @@ echo.
 
 REM Instalar dependencias
 echo  Instalando librerías necesarias...
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 if errorlevel 1 (
     echo.
     echo  ERROR al instalar librerías.

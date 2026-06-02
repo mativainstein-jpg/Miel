@@ -19,7 +19,7 @@ REM Instalar dependencias si no están
 pip show PyQt5 >nul 2>&1
 if errorlevel 1 (
     echo  Instalando dependencias por primera vez, espera un momento...
-    pip install -r requirements.txt
+    python -m pip install -r requirements.txt
     if errorlevel 1 (
         echo.
         echo  ERROR al instalar dependencias. Revisa tu conexión a internet.
