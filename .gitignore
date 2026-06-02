@@ -32,6 +32,14 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!facturas/ProcesadorFacturas.spec
+
+# Datos de usuario
+facturas/facturas.xlsx
+facturas/credentials.json
+facturas/token.json
+facturas/estado.json
+facturas/proveedores.xlsx
 
 # Installer logs
 pip-log.txt

@@ -1,6 +1,12 @@
+import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+# Cuando corre como .exe (PyInstaller frozen), los archivos de datos
+# van junto al ejecutable, no dentro del bundle comprimido.
+if getattr(sys, 'frozen', False):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).parent
 
 CUIT_NAIMAN = '33708955499'
 LABEL_PROCESADO = 'Procesado'
