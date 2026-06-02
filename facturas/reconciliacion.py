@@ -185,8 +185,9 @@ class ReconciliacionDialog(QDialog):
     def __init__(self, resultados, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Conciliación de Facturas')
-        self.setMinimumSize(1200, 700)
-        self.resize(1400, 800)
+        self.setMinimumSize(1100, 600)
+        self.showMaximized()   # arranca en pantalla completa
+        self._zoom = 2.5       # zoom inicial del PDF
 
         self._todos   = resultados
         # Solo las facturas con datos parseados pasan por conciliación manual
@@ -229,12 +230,30 @@ class ReconciliacionDialog(QDialog):
         pdf_lo    = QVBoxLayout(pdf_panel)
         pdf_lo.setContentsMargins(0, 0, 6, 0)
 
+        # Barra superior del panel PDF: título + botones zoom
+        pdf_top = QHBoxLayout()
         lbl_pdf = QLabel('Vista previa PDF')
-        lbl_pdf.setAlignment(Qt.AlignCenter)
-        lbl_pdf.setStyleSheet(
-            'background: #e8e8e8; color: #555; padding: 3px; border-radius: 3px;'
-        )
-        pdf_lo.addWidget(lbl_pdf)
+        lbl_pdf.setStyleSheet('color: #555;')
+        pdf_top.addWidget(lbl_pdf, 1)
+
+        btn_zoom_out = QPushButton('−')
+        btn_zoom_out.setFixedWidth(28)
+        btn_zoom_out.setToolTip('Reducir')
+        btn_zoom_out.clicked.connect(self._zoom_out)
+        pdf_top.addWidget(btn_zoom_out)
+
+        self._lbl_zoom = QLabel('100%')
+        self._lbl_zoom.setFixedWidth(40)
+        self._lbl_zoom.setAlignment(Qt.AlignCenter)
+        pdf_top.addWidget(self._lbl_zoom)
+
+        btn_zoom_in = QPushButton('+')
+        btn_zoom_in.setFixedWidth(28)
+        btn_zoom_in.setToolTip('Ampliar')
+        btn_zoom_in.clicked.connect(self._zoom_in)
+        pdf_top.addWidget(btn_zoom_in)
+
+        pdf_lo.addLayout(pdf_top)
 
         self._pdf_scroll = QScrollArea()
         self._pdf_scroll.setWidgetResizable(False)
@@ -289,8 +308,8 @@ class ReconciliacionDialog(QDialog):
         form_lo.addWidget(self._lbl_aviso)
 
         splitter.addWidget(form_panel)
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 5)
+        splitter.setStretchFactor(0, 6)
+        splitter.setStretchFactor(1, 4)
         root.addWidget(splitter, 1)
 
         # ── Barra de navegación ─────────────────────────────────────────
@@ -406,6 +425,16 @@ class ReconciliacionDialog(QDialog):
     # Renderizado PDF
     # ------------------------------------------------------------------
 
+    def _zoom_in(self):
+        self._zoom = min(self._zoom + 0.5, 7.5)  # máximo 300%
+        if self._items:
+            self._renderizar(self._items[self._idx])
+
+    def _zoom_out(self):
+        self._zoom = max(self._zoom - 0.5, 1.25)  # mínimo 50%
+        if self._items:
+            self._renderizar(self._items[self._idx])
+
     def _renderizar(self, r):
         if not _PDF_OK:
             self._pdf_lbl.setText(
@@ -419,8 +448,7 @@ class ReconciliacionDialog(QDialog):
             pdf_bytes = r['ruta'].read_bytes()
             doc  = _fitz.open(stream=pdf_bytes, filetype='pdf')
             page = doc[0]
-            # Zoom para buena resolución (~A4 a 150 dpi)
-            mat  = _fitz.Matrix(2.0, 2.0)
+            mat  = _fitz.Matrix(3.0, 3.0)  # alta resolución base
             pix  = page.get_pixmap(matrix=mat, alpha=False)
             png  = pix.tobytes('png')
             doc.close()
@@ -428,15 +456,16 @@ class ReconciliacionDialog(QDialog):
             pixmap = QPixmap()
             pixmap.loadFromData(png)
 
-            # Escalar al ancho disponible manteniendo proporciones
+            # zoom=2.5 → 100% (ajusta al ancho disponible)
+            # zoom>2.5 → más grande, aparece scroll horizontal
             ancho_disponible = self._pdf_scroll.viewport().width() - 10
             if ancho_disponible > 50:
-                pixmap = pixmap.scaledToWidth(
-                    ancho_disponible, Qt.SmoothTransformation
-                )
+                ancho_objetivo = int(ancho_disponible * self._zoom / 2.5)
+                pixmap = pixmap.scaledToWidth(ancho_objetivo, Qt.SmoothTransformation)
 
             self._pdf_lbl.setPixmap(pixmap)
             self._pdf_lbl.resize(pixmap.size())
+            self._lbl_zoom.setText(f'{int(self._zoom / 2.5 * 100)}%')
         except Exception as e:
             self._pdf_lbl.setText(f'Error al renderizar:\n{e}')
             self._pdf_lbl.setAlignment(Qt.AlignCenter)
