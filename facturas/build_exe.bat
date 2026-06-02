@@ -28,9 +28,9 @@ if exist dist\ProcesadorFacturas.exe (
     del /f dist\ProcesadorFacturas.exe >nul 2>&1
 )
 
-REM Compilar
+REM Compilar (usando python -m para evitar problemas de PATH)
 echo  [2/3] Compilando (tarda unos minutos)...
-pyinstaller ProcesadorFacturas.spec --clean --noconfirm
+python -m PyInstaller ProcesadorFacturas.spec --clean --noconfirm
 if errorlevel 1 (
     echo.
     echo  ERROR durante la compilacion.
