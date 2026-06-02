@@ -46,24 +46,34 @@ def parsear_factura(texto, nombre_adjunto, indice_proveedores=None, pdf_bytes=No
     if not total and tipo == 'FCC':
         total = _subtotal_linea(linea)
 
+    # Campos de percepción e impuestos adicionales
+    no_gravado     = _campo(texto, r'Importe\s*No\s*Gravado:\s*\$?\s*([\d.,]+)')
+    imp_internos   = _campo(texto, r'Impuestos?\s*Internos?:\s*\$?\s*([\d.,]+)')
+    exentos        = _campo(texto, r'Importe\s*Exento[s]?:\s*\$?\s*([\d.,]+)')
+    perc_iva       = _campo(texto, r'Percepci[oó]n\s*(?:de\s*)?IVA\s*(?:[\d.,]+\s*%)?\s*:?\s*\$?\s*([\d.,]+)')
+    perc_iibb      = _campo(texto, r'Percepci[oó]n\s*(?:de\s*)?(?:Ingresos?\s*Brutos?|IIBB)\s*(?:[\d.,]+\s*%)?\s*:?\s*\$?\s*([\d.,]+)')
+    perc_ganancias = _campo(texto, r'Percepci[oó]n\s*(?:de\s*)?Ganancias?\s*(?:[\d.,]+\s*%)?\s*:?\s*\$?\s*([\d.,]+)')
+
     kilos      = _kilos_linea(linea)
     precio_raw = _precio_unitario_linea(linea) or _campo(texto, r'Precio\s*Unit\.?\s+([\d.,]+)')
 
-    kilos_num    = _num(kilos)
-    neto_num     = _num(neto)
+    # None = no encontrado en el PDF (mostrar VERIFICAR en la UI)
+    # 0.0  = encontrado pero es cero (dato real)
+    kilos_num    = _num_o_none(kilos)
+    neto_num     = _num_o_none(neto) if tipo == 'FCA' else 0.0
     subtotal_num = _num(subtotal)
-    iva_num      = _num(iva105) + _num(iva21) + _num(iva27)
-    total_num    = _num(total)
+    iva_num      = (_num(iva105) + _num(iva21) + _num(iva27)) or (None if tipo == 'FCA' else 0.0)
+    total_num    = _num_o_none(total)
     precio_num   = _num(precio_raw)
 
-    if precio_num > 0:
+    if precio_num and precio_num > 0:
         precio_unitario_num = precio_num
-    elif tipo == 'FCC' and kilos_num > 0 and subtotal_num > 0:
+    elif tipo == 'FCC' and kilos_num and kilos_num > 0 and subtotal_num > 0:
         precio_unitario_num = subtotal_num / kilos_num
-    elif tipo == 'FCA' and kilos_num > 0 and neto_num > 0:
+    elif tipo == 'FCA' and kilos_num and kilos_num > 0 and neto_num and neto_num > 0:
         precio_unitario_num = neto_num / kilos_num
     else:
-        precio_unitario_num = 0
+        precio_unitario_num = None
 
     partes_fecha = fecha.split('/') if fecha else []
     mes  = int(partes_fecha[1]) if len(partes_fecha) > 1 else None
@@ -80,22 +90,21 @@ def parsear_factura(texto, nombre_adjunto, indice_proveedores=None, pdf_bytes=No
     ])
 
     return {
-        'tipo':                    tipo,
-        'numero':                  numero,
-        'punto_venta':             punto_venta,
-        'fecha':                   fecha,
-        'denominacion':            denominacion,
-        'cuit':                    cuit,
-        'neto_num':                0 if tipo == 'FCC' else neto_num,
-        'iva_num':                 0 if tipo == 'FCC' else iva_num,
-        'otros_tributos_num':      _num(otros),
-        # Columnas del nuevo formato — se extraen de la factura si están presentes
-        'no_gravado_num':          0,
-        'imp_internos_num':        0,
-        'exentos_num':             0,
-        'percepcion_iva_num':      0,
-        'percepcion_iibb_num':     0,
-        'percepcion_ganancias_num': 0,
+        'tipo':                    tipo   or None,
+        'numero':                  numero or None,
+        'punto_venta':             punto_venta or None,
+        'fecha':                   fecha  or None,
+        'denominacion':            denominacion or None,
+        'cuit':                    cuit   or None,
+        'neto_num':                neto_num,
+        'iva_num':                 iva_num,
+        'otros_tributos_num':      _num_o_none(otros),
+        'no_gravado_num':          _num_o_none(no_gravado),
+        'imp_internos_num':        _num_o_none(imp_internos),
+        'exentos_num':             _num_o_none(exentos),
+        'percepcion_iva_num':      _num_o_none(perc_iva),
+        'percepcion_iibb_num':     _num_o_none(perc_iibb),
+        'percepcion_ganancias_num': _num_o_none(perc_ganancias),
         'kilos_num':               kilos_num,
         'precio_unitario_num':     precio_unitario_num,
         'monotributista':          monotributista,
@@ -347,6 +356,13 @@ def _resolver_denominacion(cuit, denominacion_pdf, indice):
 def _campo(texto, patron):
     m = re.search(patron, texto, re.I)
     return m.group(1).strip() if m else ''
+
+
+def _num_o_none(s):
+    """Like _num() but returns None when the string is absent/empty."""
+    if not s or str(s).strip() == '':
+        return None
+    return _num(s)
 
 
 def _num(s):

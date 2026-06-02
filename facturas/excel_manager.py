@@ -128,15 +128,15 @@ def _armar_fila_verificada(d):
     set_col('CUIT',                 d['cuit'])
     set_col('NETO',                 d['neto_num'])
     set_col('IVA',                  d['iva_num'])
-    set_col('NO_GRAVADO',           d.get('no_gravado_num') or 0)
-    set_col('IMP_INTERNOS',         d.get('imp_internos_num') or 0)
-    set_col('EXENTOS',              d.get('exentos_num') or 0)
-    set_col('PERCEPCION_IVA',       d.get('percepcion_iva_num') or 0)
-    set_col('PERCEPCION_IIBB',      d.get('percepcion_iibb_num') or 0)
+    set_col('NO_GRAVADO',           d.get('no_gravado_num'))
+    set_col('IMP_INTERNOS',         d.get('imp_internos_num'))
+    set_col('EXENTOS',              d.get('exentos_num'))
+    set_col('PERCEPCION_IVA',       d.get('percepcion_iva_num'))
+    set_col('PERCEPCION_IIBB',      d.get('percepcion_iibb_num'))
     set_col('KILOS',                d['kilos_num'])
     set_col('PRECIO_UNITARIO',      d['precio_unitario_num'])
     set_col('MONOTRIBUTISTA',       d['monotributista'])
-    set_col('PERCEPCION_GANANCIAS', d.get('percepcion_ganancias_num') or 0)
+    set_col('PERCEPCION_GANANCIAS', d.get('percepcion_ganancias_num'))
     set_col('TOTAL',                d['total_num'])
     set_col('TASA',                 d['tasa'])
     set_col('GASTO',                d['gasto'])
@@ -152,9 +152,9 @@ def _armar_fila_verificada(d):
     set_col('NOMBRE_ADJUNTO',       d['nombre_adjunto'])
     set_col('CLAVE_COMPROBANTE',    d['clave'])
 
-    # Marcar celdas que necesitan revisión manual
+    # Marcar celdas que necesitan revisión manual (None = no se pudo extraer)
     def verificar(key, valor):
-        if not valor and valor != 0:
+        if valor is None or valor == '' or valor == 'None':
             fila[COLS[key] - 1] = 'VERIFICAR'
             cols_verificar.append(COLS[key])
 
@@ -165,18 +165,18 @@ def _armar_fila_verificada(d):
     verificar('DENOMINACION',     d['denominacion'])
     verificar('CUIT',             d['cuit'])
 
-    if not d['kilos_num'] or d['kilos_num'] <= 0:
+    if d['kilos_num'] is None or d['kilos_num'] <= 0:
         fila[COLS['KILOS'] - 1] = 'VERIFICAR'
         cols_verificar.append(COLS['KILOS'])
 
-    if not d['precio_unitario_num'] or d['precio_unitario_num'] <= 0:
+    if d['precio_unitario_num'] is None or d['precio_unitario_num'] <= 0:
         fila[COLS['PRECIO_UNITARIO'] - 1] = 'VERIFICAR'
         cols_verificar.append(COLS['PRECIO_UNITARIO'])
 
-    if not d['total_num'] or d['total_num'] <= 0:
+    if d['total_num'] is None or d['total_num'] <= 0:
         fila[COLS['TOTAL'] - 1] = 'VERIFICAR'
         cols_verificar.append(COLS['TOTAL'])
-    elif d['tipo'] == 'FCA':
+    elif d['tipo'] == 'FCA' and d['neto_num'] is not None and d['iva_num'] is not None:
         otros = d.get('otros_tributos_num') or 0
         suma  = d['neto_num'] + d['iva_num'] + otros
         if abs(d['total_num'] - suma) > 1.0:

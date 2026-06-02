@@ -4,112 +4,18 @@ import sys
 from pathlib import Path
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
-    QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QHeaderView,
-    QLabel, QMainWindow, QProgressBar, QPushButton, QTableWidget,
-    QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
+    QFileDialog, QHBoxLayout, QLabel, QMainWindow, QProgressBar,
+    QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from config import EXCEL_FACTURAS
 from procesador import (
     ProcesadorGmailWorker, ProcesadorLocalWorker, escribir_resultados_en_excel,
 )
+from reconciliacion import ReconciliacionDialog
 
-
-# ---------------------------------------------------------------------------
-# Diálogo de previsualización
-# ---------------------------------------------------------------------------
-
-class DialogoPreview(QDialog):
-    """Shows parsed invoice data before committing to Excel."""
-
-    _COLS = ['Archivo', 'Estado', 'Tipo', 'Proveedor', 'CUIT',
-             'Fecha', 'Kilos', 'Precio Unit.', 'Total']
-
-    def __init__(self, resultados, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle('Vista previa — Facturas a procesar')
-        self.setMinimumWidth(860)
-        self.setMinimumHeight(480)
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(14, 14, 14, 14)
-
-        n_ok  = sum(1 for r in resultados
-                    if r['datos'] and not r['dup_clave'] and not r['dup_nombre'])
-        n_dup = sum(1 for r in resultados
-                    if r['datos'] and (r['dup_clave'] or r['dup_nombre']))
-        n_err = sum(1 for r in resultados if r['error'])
-
-        lbl = QLabel(
-            f'<b>{n_ok}</b> para escribir &nbsp;|&nbsp; '
-            f'<b>{n_dup}</b> duplicada(s) &nbsp;|&nbsp; '
-            f'<b>{n_err}</b> con error'
-        )
-        lbl.setAlignment(Qt.AlignCenter)
-        lbl.setFont(QFont('Arial', 10))
-        layout.addWidget(lbl)
-
-        table = QTableWidget(len(resultados), len(self._COLS))
-        table.setHorizontalHeaderLabels(self._COLS)
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        table.horizontalHeader().setStretchLastSection(True)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setSelectionBehavior(QTableWidget.SelectRows)
-        table.setFont(QFont('Courier New', 9))
-        table.verticalHeader().setVisible(False)
-
-        for row, r in enumerate(resultados):
-            d = r['datos']
-            if r['error']:
-                vals  = [r['filename'], 'ERROR', '', '', '', '', '', '', '']
-                color = QColor(200, 0, 0)
-            elif r['dup_clave'] or r['dup_nombre']:
-                vals  = self._fila_valores(r['filename'], 'DUPLICADA', d)
-                color = QColor(130, 130, 130)
-            else:
-                vals  = self._fila_valores(r['filename'], 'OK', d)
-                color = None
-
-            for col, val in enumerate(vals):
-                item = QTableWidgetItem(str(val))
-                item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-                if color:
-                    item.setForeground(color)
-                elif val == 'VERIFICAR':
-                    item.setForeground(QColor(190, 90, 0))
-                table.setItem(row, col, item)
-
-        layout.addWidget(table)
-
-        btns   = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btn_ok = btns.button(QDialogButtonBox.Ok)
-        btn_ok.setText(f'✓  Escribir {n_ok} factura(s) en Excel')
-        btn_ok.setEnabled(n_ok > 0)
-        btns.button(QDialogButtonBox.Cancel).setText('Cancelar')
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
-
-    @staticmethod
-    def _fila_valores(filename, estado, d):
-        return [
-            filename,
-            estado,
-            d['tipo']         or 'VERIFICAR',
-            d['denominacion'] or 'VERIFICAR',
-            d['cuit']         or 'VERIFICAR',
-            d['fecha']        or 'VERIFICAR',
-            f"{d['kilos_num']:,.0f}"          if d['kilos_num']           else 'VERIFICAR',
-            f"{d['precio_unitario_num']:,.2f}" if d['precio_unitario_num'] else 'VERIFICAR',
-            f"{d['total_num']:,.2f}"           if d['total_num']           else 'VERIFICAR',
-        ]
-
-
-# ---------------------------------------------------------------------------
-# Ventana principal
-# ---------------------------------------------------------------------------
 
 class VentanaFacturas(QMainWindow):
     def __init__(self):
@@ -146,7 +52,9 @@ class VentanaFacturas(QMainWindow):
         self.btn_gmail = QPushButton('📧  Buscar en Gmail')
         self.btn_gmail.setMinimumHeight(38)
         self.btn_gmail.setFont(QFont('Arial', 10))
-        self.btn_gmail.setToolTip('Busca PDFs nuevos en Gmail, los procesa y etiqueta los ya procesados')
+        self.btn_gmail.setToolTip(
+            'Busca PDFs nuevos en Gmail, los procesa y etiqueta los ya procesados'
+        )
         self.btn_gmail.clicked.connect(self._procesar_gmail)
         botones.addWidget(self.btn_gmail)
 
@@ -186,7 +94,7 @@ class VentanaFacturas(QMainWindow):
         self.barra.setVisible(False)
 
     # ------------------------------------------------------------------
-    # Gmail flow — procesa y escribe directamente (batch sin preview)
+    # Gmail — procesa y escribe directamente (batch sin conciliación)
     # ------------------------------------------------------------------
 
     def _procesar_gmail(self):
@@ -199,7 +107,7 @@ class VentanaFacturas(QMainWindow):
         self.worker.start()
 
     # ------------------------------------------------------------------
-    # Local flow — parsea → muestra preview → confirma → escribe
+    # Local — parsea → conciliación factura por factura → escribe
     # ------------------------------------------------------------------
 
     def _insertar_local(self):
@@ -213,19 +121,24 @@ class VentanaFacturas(QMainWindow):
         self.worker = ProcesadorLocalWorker([Path(r) for r in rutas])
         self.worker.log.connect(self._log)
         self.worker.progreso.connect(self._progreso)
-        self.worker.preview.connect(self._mostrar_preview)
+        self.worker.preview.connect(self._abrir_conciliacion)
         self.worker.error_critico.connect(self._error_critico)
         self.worker.start()
 
-    def _mostrar_preview(self, resultados):
+    def _abrir_conciliacion(self, resultados):
         self._desbloquear()
-        dlg = DialogoPreview(resultados, self)
-        if dlg.exec_() == QDialog.Accepted:
-            self._escribir_resultados(resultados)
-        else:
-            self._log('↩ Cancelado por el usuario.')
+        n_parseable = sum(1 for r in resultados if r['datos'] and not r['error'])
+        if n_parseable == 0:
+            self._log('✗ No se pudo parsear ninguna factura.')
+            return
 
-    def _escribir_resultados(self, resultados):
+        dlg = ReconciliacionDialog(resultados, self)
+        if dlg.exec_() == ReconciliacionDialog.Accepted:
+            self._escribir(dlg.resultados_para_escribir())
+        else:
+            self._log('↩ Conciliación cancelada.')
+
+    def _escribir(self, resultados):
         self._log('Escribiendo en Excel...')
         try:
             resumen = escribir_resultados_en_excel(resultados)
@@ -260,7 +173,10 @@ class VentanaFacturas(QMainWindow):
 
     def _abrir_excel(self):
         if not EXCEL_FACTURAS.exists():
-            self._log(f'Todavía no existe {EXCEL_FACTURAS.name}. Procesá facturas primero.')
+            self._log(
+                f'Todavía no existe {EXCEL_FACTURAS.name}. '
+                'Procesá facturas primero.'
+            )
             return
 
         path = str(EXCEL_FACTURAS)
