@@ -2,9 +2,9 @@ import re
 from datetime import datetime
 import openpyxl
 from openpyxl.styles import PatternFill, Font
-from config import COLS, NUM_COLS, EXCEL_FACTURAS, EXCEL_PROVEEDORES
+from config import COLS, NUM_COLS, HEADERS_FACTURAS, EXCEL_FACTURAS, EXCEL_PROVEEDORES
 
-_FILL_ROJO  = PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
+_FILL_ROJO   = PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
 _FONT_BLANCO = Font(color='FFFFFF', bold=True)
 
 
@@ -18,7 +18,7 @@ class ExcelManager:
             self.wb = openpyxl.Workbook()
             self.wb.active.title = 'FACTURAS'
 
-        self._ensure('FACTURAS')
+        self._ensure('FACTURAS',   HEADERS_FACTURAS)
         self._ensure('DUPLICADAS', ['Fecha', 'Nombre adjunto', 'Clave comprobante', 'Motivo', 'Thread ID'])
         self._ensure('ERRORES',    ['Fecha hora', 'Nombre adjunto', 'Nivel', 'Mensaje'])
 
@@ -39,13 +39,15 @@ class ExcelManager:
     def cargar_indice_duplicados(self):
         nombres, claves = set(), set()
         ws = self.wb['FACTURAS']
+        col_nombre = COLS['NOMBRE_ADJUNTO']
+        col_clave  = COLS['CLAVE_COMPROBANTE']
         for row in ws.iter_rows(min_row=2, values_only=True):
-            if len(row) >= COLS['NOMBRE_ADJUNTO']:
-                v = row[COLS['NOMBRE_ADJUNTO'] - 1]
+            if len(row) >= col_nombre:
+                v = row[col_nombre - 1]
                 if v:
                     nombres.add(str(v))
-            if len(row) >= COLS['CLAVE_COMPROBANTE']:
-                v = row[COLS['CLAVE_COMPROBANTE'] - 1]
+            if len(row) >= col_clave:
+                v = row[col_clave - 1]
                 if v:
                     claves.add(str(v))
         return {'nombres': nombres, 'claves': claves}
@@ -110,37 +112,47 @@ def cargar_indice_proveedores():
 # ------------------------------------------------------------------
 
 def _armar_fila_verificada(d):
-    fila = [None] * NUM_COLS
+    ahora = datetime.now()
+    fila  = [None] * NUM_COLS
     cols_verificar = []
 
     def set_col(key, valor):
         fila[COLS[key] - 1] = valor
 
-    set_col('TIPO_COMPROBANTE',  d['tipo'])
-    set_col('TIPO_NUMERO',       d['tipo_numero'])
-    set_col('NUMERO',            d['numero'])
-    set_col('PUNTO_VENTA',       d['punto_venta'])
-    set_col('FECHA',             d['fecha'])
-    set_col('DENOMINACION',      d['denominacion'])
-    set_col('CUIT',              d['cuit'])
-    set_col('NETO',              d['neto_num'])
-    set_col('IVA',               d['iva_num'])
-    set_col('KILOS',             d['kilos_num'])
-    set_col('PRECIO_UNITARIO',   d['precio_unitario_num'])
-    set_col('MONOTRIBUTISTA',    d['monotributista'])
-    set_col('TOTAL',             d['total_num'])
-    set_col('TASA',              d['tasa'])
-    set_col('GASTO',             d['gasto'])
-    set_col('RUBRO',             d['rubro'])
-    set_col('MES_IMPUTACION',    d['mes'])
-    set_col('ANIO_IMPUTACION',   d['anio'])
-    set_col('CODIGO_OPERACION',  d['codigo_operacion'])
-    set_col('POSICION',          d['posicion'])
-    set_col('DESCRIPCION_GASTO', d['descripcion_gasto'])
-    set_col('DESCRIPCION_RUBRO', d['descripcion_rubro'])
-    set_col('NOMBRE_ADJUNTO',    d['nombre_adjunto'])
-    set_col('CLAVE_COMPROBANTE', d['clave'])
+    set_col('DA',                   ahora)
+    set_col('TIPO_COMPROBANTE',     d['tipo'])
+    set_col('NUMERO',               d['numero'])
+    set_col('PUNTO_VENTA',          d['punto_venta'])
+    set_col('FECHA',                d['fecha'])
+    set_col('DENOMINACION',         d['denominacion'])
+    set_col('CUIT',                 d['cuit'])
+    set_col('NETO',                 d['neto_num'])
+    set_col('IVA',                  d['iva_num'])
+    set_col('NO_GRAVADO',           d.get('no_gravado_num') or 0)
+    set_col('IMP_INTERNOS',         d.get('imp_internos_num') or 0)
+    set_col('EXENTOS',              d.get('exentos_num') or 0)
+    set_col('PERCEPCION_IVA',       d.get('percepcion_iva_num') or 0)
+    set_col('PERCEPCION_IIBB',      d.get('percepcion_iibb_num') or 0)
+    set_col('KILOS',                d['kilos_num'])
+    set_col('PRECIO_UNITARIO',      d['precio_unitario_num'])
+    set_col('MONOTRIBUTISTA',       d['monotributista'])
+    set_col('PERCEPCION_GANANCIAS', d.get('percepcion_ganancias_num') or 0)
+    set_col('TOTAL',                d['total_num'])
+    set_col('TASA',                 d['tasa'])
+    set_col('GASTO',                d['gasto'])
+    set_col('RUBRO',                d['rubro'])
+    set_col('MES_IMPUTACION',       d['mes'])
+    set_col('ANIO_IMPUTACION',      d['anio'])
+    set_col('CODIGO_OPERACION',     d['codigo_operacion'])
+    set_col('POSICION',             d['posicion'])
+    set_col('DESCRIPCION_GASTO',    d['descripcion_gasto'])
+    set_col('DESCRIPCION_RUBRO',    d['descripcion_rubro'])
+    set_col('ESTADO',               'OK')
+    set_col('HORA_ESTADO',          ahora)
+    set_col('NOMBRE_ADJUNTO',       d['nombre_adjunto'])
+    set_col('CLAVE_COMPROBANTE',    d['clave'])
 
+    # Marcar celdas que necesitan revisión manual
     def verificar(key, valor):
         if not valor and valor != 0:
             fila[COLS[key] - 1] = 'VERIFICAR'
@@ -165,7 +177,8 @@ def _armar_fila_verificada(d):
         fila[COLS['TOTAL'] - 1] = 'VERIFICAR'
         cols_verificar.append(COLS['TOTAL'])
     elif d['tipo'] == 'FCA':
-        suma = d['neto_num'] + d['iva_num'] + d['otros_tributos_num']
+        otros = d.get('otros_tributos_num') or 0
+        suma  = d['neto_num'] + d['iva_num'] + otros
         if abs(d['total_num'] - suma) > 1.0:
             for key in ('NETO', 'IVA', 'TOTAL'):
                 fila[COLS[key] - 1] = 'VERIFICAR (Suma)'
