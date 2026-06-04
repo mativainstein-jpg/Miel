@@ -34,12 +34,13 @@ MANIFEST
 *.spec
 !facturas/ProcesadorFacturas.spec
 
-# Datos de usuario
+# Datos de usuario (específicos por instalación)
 facturas/facturas.xlsx
 facturas/credentials.json
 facturas/token.json
 facturas/estado.json
-facturas/proveedores.xlsx
+# proveedores.xlsx sí va en git (configuración compartida)
+!facturas/proveedores.xlsx
 
 # Installer logs
 pip-log.txt

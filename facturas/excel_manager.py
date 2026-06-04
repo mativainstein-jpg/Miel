@@ -91,18 +91,55 @@ class ExcelManager:
 # ------------------------------------------------------------------
 
 def cargar_indice_proveedores():
+    """
+    Lee 'proveedores.xlsx' (formato Proveedores_para_cruce) y devuelve:
+      { cuit_sin_guiones: {gasto, desc_gasto, rubro, desc_rubro} }
+
+    Estructura del Excel:
+      Col A: CUIT  B: codgasto  C: Gastos  D: codrubro
+      Col E: idx_rubro (tabla auxiliar)  F: Descripción Rubro
+    """
     indice = {}
     if not EXCEL_PROVEEDORES.exists():
         return indice
 
     wb = openpyxl.load_workbook(str(EXCEL_PROVEEDORES), read_only=True)
     ws = wb.active
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if len(row) >= 2 and row[0] and row[1]:
-            cuit = re.sub(r'\D', '', str(row[0]))
-            den  = str(row[1]).strip()
-            if cuit and den:
-                indice[cuit] = den
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+
+    # Tabla de descripciones de rubro: col E (índice 4) → col F (índice 5)
+    rubros_desc = {}
+    for row in rows:
+        if len(row) >= 6 and row[4] is not None and row[5] is not None:
+            try:
+                rubros_desc[int(row[4])] = str(row[5]).strip()
+            except (ValueError, TypeError):
+                pass
+
+    # Índice de proveedores: col A → cols B-D
+    for row in rows:
+        if not row[0]:
+            continue
+        cuit = re.sub(r'\D', '', str(row[0]))
+        if not cuit:
+            continue
+        try:
+            gasto = int(row[1]) if row[1] is not None else None
+        except (ValueError, TypeError):
+            gasto = None
+        desc_gasto = str(row[2]).strip() if row[2] else None
+        try:
+            rubro = int(row[3]) if row[3] is not None else None
+        except (ValueError, TypeError):
+            rubro = None
+        desc_rubro = rubros_desc.get(rubro) if rubro is not None else None
+        indice[cuit] = {
+            'gasto':      gasto,
+            'desc_gasto': desc_gasto,
+            'rubro':      rubro,
+            'desc_rubro': desc_rubro,
+        }
+
     wb.close()
     return indice
 
@@ -184,6 +221,14 @@ def _armar_fila_verificada(d):
                 fila[COLS[key] - 1] = 'VERIFICAR (Suma)'
                 if COLS[key] not in cols_verificar:
                     cols_verificar.append(COLS[key])
+
+    if d['gasto'] is None:
+        fila[COLS['GASTO'] - 1] = 'VERIFICAR'
+        cols_verificar.append(COLS['GASTO'])
+
+    if d['rubro'] is None:
+        fila[COLS['RUBRO'] - 1] = 'VERIFICAR'
+        cols_verificar.append(COLS['RUBRO'])
 
     if not d['mes']:
         fila[COLS['MES_IMPUTACION'] - 1] = 'VERIFICAR'

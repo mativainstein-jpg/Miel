@@ -79,6 +79,17 @@ def parsear_factura(texto, nombre_adjunto, indice_proveedores=None, pdf_bytes=No
     mes  = int(partes_fecha[1]) if len(partes_fecha) > 1 else None
     anio = int(partes_fecha[2]) if len(partes_fecha) > 2 else None
 
+    # Cruce con proveedores para gasto / rubro
+    prov = None
+    if indice_proveedores and cuit:
+        cuit_num = re.sub(r'\D', '', cuit)
+        prov = indice_proveedores.get(cuit_num)
+
+    gasto      = prov['gasto']      if prov else None
+    rubro      = prov['rubro']      if prov else None
+    desc_gasto = prov['desc_gasto'] if prov else None
+    desc_rubro = prov['desc_rubro'] if prov else None
+
     posicion       = 'RM' if tipo == 'FCC' else ('RI' if tipo == 'FCA' else '')
     monotributista = 'SI' if tipo == 'FCC' else ''
 
@@ -110,14 +121,14 @@ def parsear_factura(texto, nombre_adjunto, indice_proveedores=None, pdf_bytes=No
         'monotributista':          monotributista,
         'total_num':               total_num,
         'tasa':                    0,
-        'gasto':                   4,
-        'rubro':                   6,
+        'gasto':                   gasto,
+        'rubro':                   rubro,
         'mes':                     mes,
         'anio':                    anio,
         'codigo_operacion':        '',
         'posicion':                posicion,
-        'descripcion_gasto':       'miel',
-        'descripcion_rubro':       'mercaderia',
+        'descripcion_gasto':       desc_gasto,
+        'descripcion_rubro':       desc_rubro,
         'nombre_adjunto':          nombre_adjunto,
         'clave':                   clave,
     }
@@ -345,11 +356,7 @@ def _extraer_cuit_emisor(texto):
 
 
 def _resolver_denominacion(cuit, denominacion_pdf, indice):
-    if indice and cuit:
-        cuit_limpio = re.sub(r'\D', '', cuit)
-        den = indice.get(cuit_limpio)
-        if den:
-            return den
+    # El índice de proveedores ya no contiene denominación → usar siempre el PDF
     return denominacion_pdf or ''
 
 
