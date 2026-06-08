@@ -84,6 +84,17 @@ class MielPulp:
         self.cntLotes = int(sum(self.data["Kilos"]) / self.boundMin["Kilos"])
         self.cntMuestras = self.data.shape[0]
 
+        # límite superior de Color calculado con IC bilateral 99%
+        color_col = next((c for c in ["Color", "P1"] if c in self.data.columns and c in self.boundsLabels), None)
+        if color_col:
+            vals = self.data[color_col].values
+            n = len(vals)
+            media = np.mean(vals)
+            desvio = np.sqrt(np.sum((vals - media) ** 2) / n)
+            error_estandar = desvio / np.sqrt(n)
+            z = 2.5758293035489
+            self.boundMax[color_col] = media + z * error_estandar
+
         LOTES = range(0, self.cntLotes)
         MUESTRAS = range(0, self.cntMuestras)
 
