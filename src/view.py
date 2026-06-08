@@ -1,117 +1,127 @@
-from PyQt5.QtWidgets import QApplication, QWidget, QInputDialog, QLineEdit, QFileDialog, QMainWindow, QVBoxLayout, QLabel
-from PyQt5.QtWidgets import QHBoxLayout
-from PyQt5.QtWidgets import QStatusBar
-from PyQt5.QtWidgets import QPushButton
-from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import (QApplication, QWidget, QFileDialog, QMainWindow,
+                             QVBoxLayout, QLabel, QHBoxLayout, QPushButton,
+                             QTableWidget, QTableWidgetItem)
 from PyQt5.QtCore import QCoreApplication
-from PyQt5.QtWidgets import QTableWidget,QTableWidgetItem
 import MielPulp
 import json
 import os
+import platform
+
 
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title = 'Buscador de combinación óptima.'
-        self.left = 20
-        self.top =  20 
-        self.width = 630
-        self.height = 480
-        self.miel = MielPulp.MielPulp() 
-        self.initUI()
-    
-    def initUI(self):
+        self.title = 'Buscador de combinación óptima'
+        self.miel = MielPulp.MielPulp()
+        self.boundsLoaded = False
+        self.setGeometry(20, 20, 700, 520)
         self.setWindowTitle(self.title)
-        self.setGeometry(self.left, self.top, self.width, self.height)
-        self.showGUI()
-    
-    def loadDataDir(self):
-        options = QFileDialog.Options()
-        options |= QFileDialog.DontUseNativeDialog
-        dataDir, _ = QFileDialog.getOpenFileName(self,"Selección del archivo Excel", "","Excel Files (*.xlsx)", options=options)
-        if dataDir:
-            self.miel.setDataFromDir(dataDir, "excel")
-            self.setDataTable()
+        self.initUI()
 
-            #self.cntOptimal = model.algoritmoPuLP(dataFrameDir) 
-
-    def setDataTable(self): 
-        data =  json.loads(self.miel.getDataJson())
-        horHeaders = []
-        self.dataTable.clear()
-        horHeaders = list(data.keys())
-        self.dataTable.setColumnCount(len(horHeaders))
-        fKey = horHeaders[0]
-        self.dataTable.setRowCount(len(data[fKey]))
-
-        for n, key in enumerate(data.keys()):
-            for m in list(data[key].keys()):
-                item = str(data[key][m])
-                newitem = QTableWidgetItem(item)
-                self.dataTable.setItem(int(m), n, newitem)
-        self.dataTable.setHorizontalHeaderLabels(horHeaders)   
-
-    def showGUI(self):
+    def initUI(self):
         self.vBox = QVBoxLayout()
         self.widget = QWidget()
         self.widget.setLayout(self.vBox)
         self.setCentralWidget(self.widget)
 
-        l0 = QLabel()
-        l0.setText("Datos Cargados")
-        self.vBox.addWidget(l0)
-        
+        self.vBox.addWidget(QLabel("Datos cargados"))
         self.dataTable = QTableWidget()
         self.vBox.addWidget(self.dataTable)
 
-        hBox = QHBoxLayout()
-        hBox.addStretch()
-        hBox.addStretch()
+        hButtons = QHBoxLayout()
 
-        ldf = QPushButton('Cargar Datos')
-        ldf.clicked.connect(self.loadDataDir)
+        btnDatos = QPushButton("Cargar Datos")
+        btnDatos.clicked.connect(self.loadDataDir)
+        hButtons.addWidget(btnDatos)
 
-        hBox.addWidget(ldf)
+        btnBounds = QPushButton("Cargar Bounds")
+        btnBounds.clicked.connect(self.loadBoundsDir)
+        hButtons.addWidget(btnBounds)
 
-        self.vBox.addLayout(hBox)
-        
-        hBox2 = QHBoxLayout()
+        self.vBox.addLayout(hButtons)
 
-        pbtn = QPushButton('Procesar')
-        pbtn.clicked.connect(self.processMiel)
-        hBox2.addWidget(pbtn)
+        hAcc = QHBoxLayout()
 
-        #hBox2.addStretch()
+        btnProcesar = QPushButton("Procesar")
+        btnProcesar.clicked.connect(self.processMiel)
+        hAcc.addWidget(btnProcesar)
 
-        qbtn = QPushButton('Salir')
-        qbtn.clicked.connect(QCoreApplication.instance().quit)
-        hBox2.addWidget(qbtn)
+        btnSalir = QPushButton("Salir")
+        btnSalir.clicked.connect(QCoreApplication.instance().quit)
+        hAcc.addWidget(btnSalir)
 
-        self.vBox.addLayout(hBox2)
+        self.vBox.addLayout(hAcc)
         self.show()
 
+    def loadDataDir(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar archivo de datos", "", "Excel Files (*.xlsx)", options=options
+        )
+        if path:
+            self.miel.setDataFromDir(path, "excel")
+            self.setDataTable()
+
+    def loadBoundsDir(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar archivo de bounds", "", "Excel Files (*.xlsx)", options=options
+        )
+        if path:
+            self.miel.setBoundsFromDir(path, "excel")
+            self.boundsLoaded = True
+            tipos = list(self.miel.tipos.keys())
+            self.statusBar().showMessage(f"Bounds cargados: {', '.join(tipos)}")
+
+    def setDataTable(self):
+        data = json.loads(self.miel.getDataJson())
+        self.dataTable.clear()
+        headers = list(data.keys())
+        self.dataTable.setColumnCount(len(headers))
+        self.dataTable.setRowCount(len(data[headers[0]]))
+        for n, key in enumerate(headers):
+            for m, val in enumerate(data[key].values()):
+                self.dataTable.setItem(m, n, QTableWidgetItem(str(val)))
+        self.dataTable.setHorizontalHeaderLabels(headers)
+
     def processMiel(self):
-        sep = os.sep
-        self.miel.setBoundsFromDir(".." + sep + "bounds.xlsx", "excel")
-        import platform
+        if not self.boundsLoaded:
+            # fallback: buscar bounds.xlsx en la carpeta padre
+            sep = os.sep
+            fallback = os.path.join(os.getcwd(), ".." + sep + "bounds.xlsx")
+            if os.path.exists(fallback):
+                self.miel.setBoundsFromDir(fallback, "excel")
+                self.boundsLoaded = True
+            else:
+                self.statusBar().showMessage("Cargá el archivo de bounds primero.")
+                return
+
+        # solver: HiGHS en Mac/Linux, CBC en Windows como fallback
+        solveDir = ""
         if platform.system() == "Windows":
-            cwd = os.getcwd()
-            solveDirTemp = ".." + sep + "Cbc-2.7.5-win64" + sep + "bin" + sep + "cbc.exe"
-            solveDir = os.path.join(cwd, solveDirTemp)
-        else:
-            solveDir = ""
+            sep = os.sep
+            solveDir = os.path.join(
+                os.getcwd(), ".." + sep + "Cbc-2.7.5-win64" + sep + "bin" + sep + "cbc.exe"
+            )
 
-        self.optimals = self.miel.processModel(solveDir)
-        #self.statusBar().showMessage('Procesando...')
+        self.statusBar().showMessage("Procesando... puede tardar varios minutos.")
+        QApplication.processEvents()
 
-        self.saveResults()
-    
-    def saveResults(self):
-        msg = 'Soluciones óptimas: ' + str(self.optimals)
-        if hasattr(self.miel, 'rowScores') and self.miel.rowScores:
-            best = self.miel.rowScores[0]
-            if best > 0:
-                msg += '  |  Mejor puntaje de posición (solución 1): ' + str(best) + ' tambores en misma columna'
+        n_tipos = self.miel.processModel(solveDir, timeLimit=7200)
+        self.saveResults(n_tipos)
+
+    def saveResults(self, n_tipos):
+        sep = os.sep
+        outPath = os.path.join(os.getcwd(), ".." + sep + "results.xlsx")
+        self.miel.saveResultsToExcelDir(outPath)
+
+        total_lotes = sum(len(v) for v in self.miel.results.values())
+        tipos_str = ", ".join(
+            f"{t}: {len(l)} lote(s)" for t, l in self.miel.results.items()
+        )
+        msg = f"Listo. {total_lotes} lote(s) en {n_tipos} tipo(s): {tipos_str}"
+        if self.miel.rowScore > 0:
+            msg += f"  |  Puntaje posición: {self.miel.rowScore}"
         self.statusBar().showMessage(msg)
-        self.miel.saveResultsToExcelDir(".." + os.sep + "results.xlsx")
-
