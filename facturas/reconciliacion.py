@@ -22,7 +22,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 _CAMPOS = [
     ('tipo',                    'Tipo',               True),
-    ('punto_venta',             'Punto de Venta',     True),
+    ('punto_venta',             'Punto de Venta',     False),
     ('numero',                  'Número',             True),
     ('fecha',                   'Fecha',              True),
     ('denominacion',            'Denominación',       True),

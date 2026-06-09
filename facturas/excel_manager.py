@@ -197,7 +197,6 @@ def _armar_fila_verificada(d):
 
     verificar('TIPO_COMPROBANTE', d['tipo'])
     verificar('NUMERO',           d['numero'])
-    verificar('PUNTO_VENTA',      d['punto_venta'])
     verificar('FECHA',            d['fecha'])
     verificar('DENOMINACION',     d['denominacion'])
     verificar('CUIT',             d['cuit'])
