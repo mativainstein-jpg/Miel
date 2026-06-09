@@ -403,7 +403,10 @@ def _limpiar_texto(texto):
     if not texto:
         return ''
     texto = re.sub(r'\s+', ' ', str(texto))
-    texto = re.sub(r'CUIT.*',         '', texto, flags=re.I)
-    texto = re.sub(r'Condici[oó]n.*', '', texto, flags=re.I)
-    texto = re.sub(r'Domicilio.*',    '', texto, flags=re.I)
+    # Cortar en cualquier campo AFIP que aparezca pegado al nombre
+    texto = re.sub(r'\s*Fecha\s*de\s*Emisi[oó]n.*', '', texto, flags=re.I)
+    texto = re.sub(r'\s*CUIT.*',                     '', texto, flags=re.I)
+    texto = re.sub(r'\s*Condici[oó]n.*',             '', texto, flags=re.I)
+    texto = re.sub(r'\s*Domicilio.*',                '', texto, flags=re.I)
+    texto = re.sub(r'\s*Punto\s*de\s*Venta.*',       '', texto, flags=re.I)
     return texto.strip()
