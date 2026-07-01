@@ -42,7 +42,7 @@ class ProcesadorGmailWorker(QThread):
         self.log.emit(f'Total en Gmail: {len(todos)} | Nuevos a procesar: {len(pendientes)}')
 
         if not pendientes:
-            self.terminado.emit({'ok': 0, 'duplicados': 0, 'errores': 0})
+            self.terminado.emit({'ok': 0, 'duplicados': 0, 'errores': 0, 'verificar': 0})
             return
 
         indice_proveedores = cargar_indice_proveedores()
@@ -54,7 +54,7 @@ class ProcesadorGmailWorker(QThread):
         excel = ExcelManager()
         indice_duplicados = excel.cargar_indice_duplicados()
 
-        ok = duplicados = errores = 0
+        ok = duplicados = errores = verificar = 0
         threads_completos = {}  # thread_id → set of claves del thread procesadas hoy
 
         try:
@@ -100,6 +100,8 @@ class ProcesadorGmailWorker(QThread):
                     indice_duplicados['claves'].add(datos['clave'])
                     estado.add(item['clave'])
                     ok += 1
+                    if cols_verificar:
+                        verificar += 1
 
                     if cols_verificar:
                         self.log.emit(f'  ✓ OK (revisar col. {cols_verificar}): '
@@ -128,7 +130,8 @@ class ProcesadorGmailWorker(QThread):
             except Exception as e:
                 self.log.emit(f'  ⚠ No se pudo aplicar label al thread: {e}')
 
-        self.terminado.emit({'ok': ok, 'duplicados': duplicados, 'errores': errores})
+        self.terminado.emit({'ok': ok, 'duplicados': duplicados,
+                             'errores': errores, 'verificar': verificar})
 
 
 # ---------------------------------------------------------------------------
@@ -215,12 +218,13 @@ def escribir_resultados_en_excel(resultados):
     """
     Write pre-parsed results to Excel. Called from the main thread after
     the user confirms the preview dialog.
-    Returns {'ok': int, 'duplicados': int, 'errores': int}.
+    Returns {'ok', 'duplicados', 'errores', 'verificar'}.
+    'verificar' = cuántas facturas quedaron con algún campo en rojo (VERIFICAR).
     """
     excel = ExcelManager()
     indice_duplicados = excel.cargar_indice_duplicados()
 
-    ok = duplicados = errores = 0
+    ok = duplicados = errores = verificar = 0
 
     try:
         for r in resultados:
@@ -242,7 +246,9 @@ def escribir_resultados_en_excel(resultados):
                 duplicados += 1
                 continue
 
-            excel.escribir_factura(datos)
+            cols_verificar = excel.escribir_factura(datos)
+            if cols_verificar:
+                verificar += 1
             indice_duplicados['nombres'].add(r['filename'])
             indice_duplicados['claves'].add(datos['clave'])
             ok += 1
@@ -251,7 +257,7 @@ def escribir_resultados_en_excel(resultados):
         excel.guardar()
         excel.cerrar()
 
-    return {'ok': ok, 'duplicados': duplicados, 'errores': errores}
+    return {'ok': ok, 'duplicados': duplicados, 'errores': errores, 'verificar': verificar}
 
 
 # ---------------------------------------------------------------------------

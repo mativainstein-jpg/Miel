@@ -8,7 +8,8 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QFont, QPixmap
 from PyQt5.QtWidgets import (
     QDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
+    QVBoxLayout, QWidget,
 )
 
 try:
@@ -366,10 +367,30 @@ class ReconciliacionDialog(QDialog):
         bot.addWidget(self._btn_escribir)
 
         btn_cancelar = QPushButton('Cancelar todo')
-        btn_cancelar.clicked.connect(self.reject)
+        btn_cancelar.clicked.connect(self._cancelar_todo)
         bot.addWidget(btn_cancelar)
 
         root.addLayout(bot)
+
+    def _cancelar_todo(self):
+        if self._confirmar_cancelar():
+            self.reject()
+
+    def _confirmar_cancelar(self):
+        resp = QMessageBox.question(
+            self, 'Cancelar todo',
+            'Si cancelás, se pierde toda la revisión y no se guarda ninguna '
+            'factura.\n\n¿Seguro?',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        return resp == QMessageBox.Yes
+
+    def closeEvent(self, event):
+        # La X de la ventana también pide confirmación (evita perder trabajo)
+        if self._confirmar_cancelar():
+            event.accept()
+        else:
+            event.ignore()
 
     # ------------------------------------------------------------------
     # Carga de una factura en el formulario
@@ -510,12 +531,16 @@ class ReconciliacionDialog(QDialog):
         )
         omitidas = len(self._decisiones) - confirmadas
         self._lbl_titulo.setText(
-            f'Revisión completa  —  '
-            f'{confirmadas} para escribir, {omitidas} omitidas'
+            f'Terminaste de revisar. Ahora apretá el botón VERDE de abajo '
+            f'para guardar ({confirmadas} factura/s).'
         )
+        self._lbl_titulo.setStyleSheet('color: #2d7a2d;')
         self._btn_confirmar.setEnabled(False)
         self._btn_omitir.setEnabled(False)
         self._btn_escribir.setEnabled(confirmadas > 0)
+        # Resaltar el botón para que sea imposible no verlo
+        if confirmadas > 0:
+            self._btn_escribir.setText('✓  GUARDAR EN EXCEL  ✓')
         self._refrescar_contadores()
 
     def _refrescar_contadores(self):
