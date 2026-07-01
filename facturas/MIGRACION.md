@@ -58,11 +58,13 @@ un solver de optimización y planillas sueltas. Hay que dejar un repo limpio con
    `facturas/`). Es decir: tras `git clone`, entrar a la carpeta `Facturas` y
    ahí mismo está `primera_vez.bat` y `procesar.bat`.
 
-6. **Verificar** que `python -m py_compile *.py` no dé errores y que
-   `actualizar.py` siga apuntando a la rama `main`.
+6. **Verificar** que `python -m py_compile *.py` no dé errores.
+   Nota: `actualizar.py` NO tiene una rama fija — usa la rama actual
+   (`git rev-parse --abbrev-ref HEAD`), así que funciona con `master` o `main`.
 
-7. **Commit y push a `main`.** Usar una sola rama `main` (el usuario no maneja
-   ramas). Mensaje de commit: "Migrar app de facturas a repo propio (raíz)".
+7. **Commit y push a la rama por defecto del repo** (probablemente `master`).
+   Usar una sola rama (el usuario no maneja ramas). Mensaje de commit:
+   "Migrar app de facturas a repo propio (raíz)".
 
 8. Confirmar al usuario, en palabras simples, que quedó listo y cómo seguir:
    instalar en la PC del administrativo siguiendo `COMO_ACTUALIZAR.md`.

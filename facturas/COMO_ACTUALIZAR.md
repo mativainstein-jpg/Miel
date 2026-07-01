@@ -52,10 +52,9 @@ Listo. A partir de acá, el administrativo **solo abre `procesar.bat`**.
 3. La próxima vez que el administrativo abra `procesar.bat` **con internet**,
    ya tiene tu cambio. No descarga nada a mano.
 
-> **Nota sobre la rama:** la PC del administrativo sigue la rama que clonaste.
-> Lo recomendable es que el administrativo use la rama estable (`main`), y que
-> vos pruebes los cambios en tu rama antes de pasarlos a `main`. Así nunca ve
-> una versión a medio hacer.
+> **Nota sobre las ramas:** no te preocupes por esto. Se usa una sola rama
+> (la que trae el repo por defecto) y Claude se encarga de probar los cambios
+> antes de publicarlos. Vos nunca tenés que mover nada entre ramas.
 
 ---
 
