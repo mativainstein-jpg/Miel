@@ -12,6 +12,13 @@ class ProcesadorGmailWorker(QThread):
     terminado = pyqtSignal(dict)
     error_critico = pyqtSignal(str)
 
+    def __init__(self):
+        super().__init__()
+        self._cancelado = False
+
+    def cancelar(self):
+        self._cancelado = True
+
     def run(self):
         try:
             self._ejecutar()
@@ -39,6 +46,11 @@ class ProcesadorGmailWorker(QThread):
             return
 
         indice_proveedores = cargar_indice_proveedores()
+        if not indice_proveedores:
+            self.log.emit(
+                '  ⚠ No se encontró "proveedores.xlsx" (o está vacío): '
+                'Gasto y Rubro quedarán en VERIFICAR para todas las facturas.'
+            )
         excel = ExcelManager()
         indice_duplicados = excel.cargar_indice_duplicados()
 
@@ -47,6 +59,10 @@ class ProcesadorGmailWorker(QThread):
 
         try:
             for i, item in enumerate(pendientes):
+                if self._cancelado:
+                    self.log.emit('↩ Cancelado por el usuario.')
+                    break
+
                 self.progreso.emit(i + 1, len(pendientes))
                 self.log.emit(f'[{i+1}/{len(pendientes)}] {item["filename"]}')
 
@@ -133,6 +149,10 @@ class ProcesadorLocalWorker(QThread):
     def __init__(self, rutas):
         super().__init__()
         self.rutas = rutas  # list of Path objects
+        self._cancelado = False
+
+    def cancelar(self):
+        self._cancelado = True
 
     def run(self):
         try:
@@ -142,6 +162,11 @@ class ProcesadorLocalWorker(QThread):
 
     def _ejecutar(self):
         indice_proveedores = cargar_indice_proveedores()
+        if not indice_proveedores:
+            self.log.emit(
+                '  ⚠ No se encontró "proveedores.xlsx" (o está vacío): '
+                'Gasto y Rubro quedarán en VERIFICAR para todas las facturas.'
+            )
 
         # Read duplicate indices without keeping workbook open
         excel = ExcelManager()
@@ -152,6 +177,10 @@ class ProcesadorLocalWorker(QThread):
         resultados = []
 
         for i, ruta in enumerate(self.rutas):
+            if self._cancelado:
+                self.log.emit('↩ Cancelado por el usuario.')
+                break
+
             self.progreso.emit(i + 1, total)
             self.log.emit(f'[{i+1}/{total}] Leyendo {ruta.name}...')
 

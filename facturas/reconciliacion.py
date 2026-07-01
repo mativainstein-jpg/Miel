@@ -2,6 +2,8 @@
 Diálogo de conciliación: revisa y edita cada factura una por una antes de
 escribir en Excel. Vista PDF al costado del formulario editable.
 """
+import re
+
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QFont, QPixmap
 from PyQt5.QtWidgets import (
@@ -15,6 +17,8 @@ try:
 except ImportError:
     _PDF_OK = False
 
+from pdf_parser import _num as _parsear_numero_flexible
+
 
 # ---------------------------------------------------------------------------
 # Definición de campos del formulario
@@ -27,8 +31,8 @@ _CAMPOS = [
     ('fecha',                   'Fecha',              True),
     ('denominacion',            'Denominación',       True),
     ('cuit',                    'CUIT',               True),
-    ('neto_num',                'Neto gravado',       False),
-    ('iva_num',                 'IVA',                False),
+    ('neto_num',                'Neto gravado',       True),
+    ('iva_num',                 'IVA',                True),
     ('no_gravado_num',          'No gravado',         False),
     ('imp_internos_num',        'Imp. Internos',      False),
     ('exentos_num',             'Exentos',            False),
@@ -85,10 +89,11 @@ def _de_texto(key, text):
     if not text:
         return None
     if key in _NUM_KEYS:
-        try:
-            return float(text.replace(',', ''))
-        except ValueError:
+        # Acepta formato US (1234.56) y AR (1.234,56); rechaza texto no numérico
+        # en lugar de adivinar (evita guardar un valor falso silenciosamente).
+        if not re.match(r'^-?[\d.,]+$', text):
             return None
+        return _parsear_numero_flexible(text)
     if key in _INT_KEYS:
         try:
             return int(text)

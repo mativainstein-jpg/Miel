@@ -39,6 +39,7 @@ facturas/facturas.xlsx
 facturas/credentials.json
 facturas/token.json
 facturas/estado.json
+facturas/error.log
 # proveedores.xlsx sí va en git (configuración compartida)
 !facturas/proveedores.xlsx
 

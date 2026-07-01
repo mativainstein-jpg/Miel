@@ -1,7 +1,7 @@
 import io
 import re
 import pdfplumber
-from config import CUIT_NAIMAN, COLS
+from config import CUIT_NAIMAN, COLS, PUNTO_VENTA_FIJO
 
 
 # ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ def parsear_factura(texto, nombre_adjunto, indice_proveedores=None, pdf_bytes=No
     linea = _extraer_linea_producto(texto, pdf_bytes)
 
     numero      = _campo(texto, r'Comp\.\s*Nro:\s*0*(\d+)')
-    punto_venta = '4'  # fijo por configuración de la empresa
+    punto_venta = PUNTO_VENTA_FIJO
     fecha       = _campo(texto, r'Fecha\s*de\s*Emisi[oó]n:\s*(\d{2}/\d{2}/\d{4})')
 
     denominacion_pdf = _extraer_denominacion(texto)

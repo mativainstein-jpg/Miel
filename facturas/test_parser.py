@@ -30,18 +30,25 @@ _CAMPOS = [
     ('posicion',            'Posición'),
     ('mes',                 'Mes'),
     ('anio',                'Año'),
+    ('gasto',               'Gasto (cruce proveedores)'),
+    ('descripcion_gasto',   'Descripción gasto'),
+    ('rubro',               'Rubro (cruce proveedores)'),
+    ('descripcion_rubro',   'Descripción rubro'),
     ('clave',               'Clave comprobante'),
 ]
 
 # Campos críticos que se marcan con ⚠ si están vacíos
-_CRITICOS = {'tipo', 'denominacion', 'cuit', 'fecha', 'kilos_num', 'precio_unitario_num', 'total_num'}
+_CRITICOS = {
+    'tipo', 'denominacion', 'cuit', 'fecha', 'neto_num', 'iva_num',
+    'kilos_num', 'precio_unitario_num', 'total_num', 'gasto', 'rubro',
+}
 
 
 def _fmt(val):
     if val is None or val == '':
         return '—'
     if isinstance(val, float):
-        return f'{val:,.2f}' if val else '—'
+        return f'{val:,.2f}'
     return str(val)
 
 
@@ -77,7 +84,9 @@ def analizar(ruta: Path, indice_proveedores: dict):
     for key, label in _CAMPOS:
         val = datos.get(key)
         texto_val = _fmt(val)
-        vacio = texto_val == '—' or (isinstance(val, float) and val == 0.0)
+        # None/'' = no encontrado (VERIFICAR). 0.0 es un valor real (ej. IVA de un
+        # monotributista), no "vacío" — misma semántica que excel_manager/reconciliacion.
+        vacio = val is None or val == ''
         critico = key in _CRITICOS and vacio
         marca = '  ⚠' if critico else ''
         if critico:

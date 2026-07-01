@@ -12,11 +12,17 @@ class ExcelManager:
     """Keeps the workbook open for the duration of a processing run."""
 
     def __init__(self):
-        if EXCEL_FACTURAS.exists():
-            self.wb = openpyxl.load_workbook(str(EXCEL_FACTURAS))
-        else:
-            self.wb = openpyxl.Workbook()
-            self.wb.active.title = 'FACTURAS'
+        try:
+            if EXCEL_FACTURAS.exists():
+                self.wb = openpyxl.load_workbook(str(EXCEL_FACTURAS))
+            else:
+                self.wb = openpyxl.Workbook()
+                self.wb.active.title = 'FACTURAS'
+        except PermissionError:
+            raise PermissionError(
+                f'No se puede abrir "{EXCEL_FACTURAS.name}" porque está abierto '
+                'en Excel (u otro programa). Cerralo e intentá de nuevo.'
+            )
 
         self._ensure('FACTURAS',   HEADERS_FACTURAS)
         self._ensure('DUPLICADAS', ['Fecha', 'Nombre adjunto', 'Clave comprobante', 'Motivo', 'Thread ID'])
@@ -80,7 +86,13 @@ class ExcelManager:
     # ------------------------------------------------------------------
 
     def guardar(self):
-        self.wb.save(str(EXCEL_FACTURAS))
+        try:
+            self.wb.save(str(EXCEL_FACTURAS))
+        except PermissionError:
+            raise PermissionError(
+                f'No se puede guardar "{EXCEL_FACTURAS.name}" porque está abierto '
+                'en Excel (u otro programa). Cerralo y volvé a procesar las facturas.'
+            )
 
     def cerrar(self):
         self.wb.close()
@@ -103,7 +115,13 @@ def cargar_indice_proveedores():
     if not EXCEL_PROVEEDORES.exists():
         return indice
 
-    wb = openpyxl.load_workbook(str(EXCEL_PROVEEDORES), read_only=True)
+    try:
+        wb = openpyxl.load_workbook(str(EXCEL_PROVEEDORES), read_only=True)
+    except PermissionError:
+        raise PermissionError(
+            f'No se puede leer "{EXCEL_PROVEEDORES.name}" porque está abierto '
+            'en Excel (u otro programa). Cerralo e intentá de nuevo.'
+        )
     ws = wb.active
     rows = list(ws.iter_rows(min_row=2, values_only=True))
 
@@ -208,6 +226,14 @@ def _armar_fila_verificada(d):
     if d['precio_unitario_num'] is None or d['precio_unitario_num'] <= 0:
         fila[COLS['PRECIO_UNITARIO'] - 1] = 'VERIFICAR'
         cols_verificar.append(COLS['PRECIO_UNITARIO'])
+
+    if d['tipo'] == 'FCA' and d['neto_num'] is None:
+        fila[COLS['NETO'] - 1] = 'VERIFICAR'
+        cols_verificar.append(COLS['NETO'])
+
+    if d['tipo'] == 'FCA' and d['iva_num'] is None:
+        fila[COLS['IVA'] - 1] = 'VERIFICAR'
+        cols_verificar.append(COLS['IVA'])
 
     if d['total_num'] is None or d['total_num'] <= 0:
         fila[COLS['TOTAL'] - 1] = 'VERIFICAR'

@@ -47,6 +47,11 @@ class VentanaFacturas(QMainWindow):
         self.barra.setVisible(False)
         layout.addWidget(self.barra)
 
+        self.btn_cancelar = QPushButton('✕  Cancelar')
+        self.btn_cancelar.setVisible(False)
+        self.btn_cancelar.clicked.connect(self._cancelar_worker)
+        layout.addWidget(self.btn_cancelar)
+
         botones = QHBoxLayout()
 
         self.btn_gmail = QPushButton('📧  Buscar en Gmail')
@@ -86,12 +91,21 @@ class VentanaFacturas(QMainWindow):
         self.btn_local.setEnabled(False)
         self.barra.setValue(0)
         self.barra.setVisible(True)
+        self.btn_cancelar.setEnabled(True)
+        self.btn_cancelar.setVisible(True)
         self._log('─' * 55)
 
     def _desbloquear(self):
         self.btn_gmail.setEnabled(True)
         self.btn_local.setEnabled(True)
         self.barra.setVisible(False)
+        self.btn_cancelar.setVisible(False)
+
+    def _cancelar_worker(self):
+        if self.worker is not None:
+            self.worker.cancelar()
+            self.btn_cancelar.setEnabled(False)
+            self._log('… cancelando (termina la factura en curso)…')
 
     # ------------------------------------------------------------------
     # Gmail — procesa y escribe directamente (batch sin conciliación)

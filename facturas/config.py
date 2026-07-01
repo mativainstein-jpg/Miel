@@ -9,6 +9,7 @@ else:
     BASE_DIR = Path(__file__).parent
 
 CUIT_NAIMAN = '33708955499'
+PUNTO_VENTA_FIJO = '4'   # todas las facturas se cargan con este punto de venta
 LABEL_PROCESADO = 'Procesado'
 
 EXCEL_FACTURAS   = BASE_DIR / 'facturas.xlsx'
