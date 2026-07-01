@@ -1,39 +1,29 @@
 @echo off
+chcp 65001 >nul
 title Procesador de Facturas
 cd /d "%~dp0"
 
-REM Verificar que Python esté instalado
+REM ── Verificar Python ────────────────────────────────────────
 python --version >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo  ERROR: Python no está instalado.
-    echo.
-    echo  Descargalo desde: https://www.python.org/downloads/
-    echo  Asegurate de marcar "Add Python to PATH" durante la instalación.
+    echo  ERROR: Python no esta instalado.
+    echo  Ejecuta primero  primera_vez.bat
     echo.
     pause
     exit /b 1
 )
 
-REM Instalar dependencias si no están
-pip show PyQt5 >nul 2>&1
-if errorlevel 1 (
-    echo  Instalando dependencias por primera vez, espera un momento...
-    python -m pip install -r requirements.txt
-    if errorlevel 1 (
-        echo.
-        echo  ERROR al instalar dependencias. Revisa tu conexión a internet.
-        echo.
-        pause
-        exit /b 1
-    )
-    echo  Dependencias instaladas correctamente.
-)
+REM ── Buscar la ultima version (si hay internet) ──────────────
+python actualizar.py
 
-REM Iniciar la aplicación
+REM ── Instalar lo que falte (rapido si ya esta todo) ──────────
+python -m pip install -q -r requirements.txt 2>nul
+
+REM ── Iniciar la aplicacion ───────────────────────────────────
 python main.py
 if errorlevel 1 (
     echo.
-    echo  La aplicación cerró con un error. Revisá el mensaje de arriba.
+    echo  La aplicacion cerro con un error. Revisa el mensaje de arriba.
     pause
 )
