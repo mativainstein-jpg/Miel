@@ -2,320 +2,179 @@ import numpy as np
 import pandas as pd
 import pulp
 
-Z_99 = 2.5758293035489
-
-
 class MielPulp:
-
-    # ------------------------------------------------------------------ carga
+    
+    
 
     def setDataFromExcel(self, dirData):
-        self.data = pd.read_excel(dirData).reset_index(drop=True)
+        self.data = pd.read_excel(dirData)
+    
+    switcherData = {
+            "excel" : setDataFromExcel
+            }
 
-    switcherData = {"excel": setDataFromExcel}
 
     def defaultCase(self, dirData):
         print("Invalid type file")
-
+    
     def setDataFromDir(self, dirData, typeFile):
         func = self.switcherData.get(typeFile, self.defaultCase)
         return func(self, dirData)
-
+    
+            
     def setBoundsFromExcel(self, dirBounds):
-        xl = pd.ExcelFile(dirBounds)
-        self.tipos = {}
-        for sheet in xl.sheet_names:
-            df = pd.read_excel(dirBounds, sheet_name=sheet)
-            labels = list(df.columns)[1:]
-            bound_min = dict(zip(labels, [df.loc[0, c] for c in labels]))
-            bound_max = dict(zip(labels, [df.loc[1, c] for c in labels]))
-            self.tipos[sheet] = {"min": bound_min, "max": bound_max, "labels": labels}
-
-    switcherBounds = {"excel": setBoundsFromExcel}
+        bounds = pd.read_excel(dirBounds)
+        self.setBounds(bounds)
+    
+    def setBounds(self, bounds):
+        self.boundsLabels = list(bounds.columns)[1::] # no tengo en cuenta la primera
+        #cotas de las propiedades
+        self.boundMin = dict(zip(self.boundsLabels, bounds.loc[0,"Kilos"::]))
+        self.boundMax = dict(zip(self.boundsLabels, bounds.loc[1,"Kilos"::]))
+    
+    switcherBounds = {
+            "excel" : setBoundsFromExcel
+            }
 
     def setBoundsFromDir(self, dirBounds, typeFile):
         func = self.switcherBounds.get(typeFile, self.defaultCase)
         return func(self, dirBounds)
 
+
     def getDataJson(self):
         return self.data.to_json()
+    
+    def addResult(self, x, y):
+        LOTES = range(0, self.cntLotes)
+        MUESTRAS = range(0, self.cntMuestras)
+        l = [x[j].varValue for j in LOTES]
+        m = [[int(y[l][m].varValue) for l in LOTES] for m in MUESTRAS]
+        self.results.append((l, m))
 
-    # --------------------------------------------------------------- helpers
+    def processModel(self, dirSolver = ""):
 
-    def _positionColumn(self):
-        for name in ["Columnas", "Columna", "Fila"]:
-            if name in self.data.columns:
-                return name
-        return None
+        #obtengo la cantidad posible de lotes, sumando todos los pesos y lo divido por la cota minima
+        self.cntLotes = int(sum(self.data["Kilos"])/self.boundMin["Kilos"])
+        self.cntMuestras = self.data.shape[0]
+ 
+        LOTES = range(0, self.cntLotes)
+        MUESTRAS = range(0, self.cntMuestras)
 
-    def _parseColumnas(self, valor):
-        return set(str(valor).replace(" ", "").split(","))
-
-    def _colorColumn(self):
-        for name in ["Color", "P1"]:
-            if name in self.data.columns:
-                return name
-        return None
-
-    # ------------------------------------------- pre-proceso antes del modelo
-
-    def _prefilter(self):
-        """Para cada tambor, determina a qué tipos podría pertenecer."""
-        M = range(len(self.data))
-        self.eligible = {m: set() for m in M}
-        color_col = self._colorColumn()
-
-        for tipo, bounds in self.tipos.items():
-            for m in M:
-                ok = True
-                for p in bounds["labels"][1:]:   # saltear Kilos
-                    if p == color_col:            # Color se verifica por IC, no por media
-                        continue
-                    if p not in self.data.columns:
-                        continue
-                    val = float(self.data[p].iloc[m])
-                    if val < bounds["min"][p] or val > bounds["max"][p]:
-                        ok = False
-                        break
-                if ok:
-                    self.eligible[m].add(tipo)
-
-    def _margenColorLP(self):
-        """Calcula el margen de seguridad del IC para la restricción de Color en el LP."""
-        color_col = self._colorColumn()
-        if color_col is None or color_col not in self.data.columns:
-            return {}
-
-        sigma = float(np.sqrt(
-            np.sum((self.data[color_col].values - np.mean(self.data[color_col].values)) ** 2)
-            / len(self.data)
-        ))
-
-        margenes = {}
-        for tipo, bounds in self.tipos.items():
-            if color_col not in bounds["labels"]:
-                continue
-            max_kilos_barrel = float(self.data["Kilos"].max())
-            n_min = max(1, int(bounds["min"]["Kilos"] / max_kilos_barrel))
-            margen = Z_99 * sigma / np.sqrt(n_min)
-            margenes[tipo] = {
-                "effective_max": bounds["max"][color_col] - margen,
-                "bound_min": bounds["min"][color_col],
-            }
-        return margenes
-
-    # ---------------------------------------------------- cálculo IC por lote
-
-    def _colorIC(self, batch):
-        """IC superior 99% de Color para los tambores del lote."""
-        color_col = self._colorColumn()
-        if color_col is None or not batch:
-            return None
-        vals = [float(self.data[color_col].iloc[m]) for m in batch]
-        n = len(vals)
-        media = sum(vals) / n
-        desvio = np.sqrt(sum((v - media) ** 2 for v in vals) / n)
-        return media + Z_99 * (desvio / np.sqrt(n))
-
-    # ------------------------------------------------------------ optimización
-
-    def processModel(self, dirSolver="", timeLimit=7200):
-        M = list(range(len(self.data)))
-
-        self._prefilter()
-        color_col = self._colorColumn()
-        margenes_color = self._margenColorLP()
-
-        total_kilos = float(self.data["Kilos"].sum())
-        global_min_kilos = min(b["min"]["Kilos"] for b in self.tipos.values())
-        total_slots_max = int(total_kilos / global_min_kilos)
-
-        # slots por tipo
-        tipo_slots = {}
-        for tipo, bounds in self.tipos.items():
-            elig_kilos = sum(
-                float(self.data["Kilos"].iloc[m]) for m in M if tipo in self.eligible[m]
-            )
-            n_slots = min(int(elig_kilos / bounds["min"]["Kilos"]), total_slots_max)
-            tipo_slots[tipo] = list(range(max(n_slots, 0)))
-
-        # variables
-        x, y = {}, {}
-        for tipo, slots in tipo_slots.items():
-            safe = tipo.replace(" ", "_").replace("/", "_")
-            x[tipo] = pulp.LpVariable.dicts(f"X_{safe}", slots, cat="Binary")
-            y[tipo] = {}
-            elig_m = [m for m in M if tipo in self.eligible[m]]
-            for l in slots:
-                y[tipo][l] = pulp.LpVariable.dicts(f"Y_{safe}_{l}", elig_m, cat="Binary")
-
-        model = pulp.LpProblem("Miel_MultiTipo", pulp.LpMaximize)
-
-        # objetivo: maximizar kilos asignados
+        #----------------------------------------------------------------------------------
+        #lo siguiente define todo el modelo, variables y restricciones 
+        #variable de lotes a armar
+        x = pulp.LpVariable.dicts("X", LOTES, cat = "Binary")
+        #matriz binaria
+        y = pulp.LpVariable.dicts("Y", (LOTES, MUESTRAS), cat = "Binary")
+        
+        #modelo
+        model = pulp.LpProblem("Miel_Combinacion", pulp.LpMaximize)
+        
+    
         model += pulp.lpSum(
-            float(self.data["Kilos"].iloc[m]) * y[tipo][l][m]
-            for tipo, slots in tipo_slots.items()
-            for l in slots
-            for m in y[tipo][l]
-        )
-
-        # orden de slots (sin huecos)
-        for tipo, slots in tipo_slots.items():
-            for i in range(len(slots) - 1):
-                model += x[tipo][slots[i]] >= x[tipo][slots[i + 1]]
-
-        # correlación: si hay tambor en lote, lote está activo
-        for tipo, slots in tipo_slots.items():
-            for l in slots:
-                for m in y[tipo][l]:
-                    model += x[tipo][l] >= y[tipo][l][m]
-
-        # cada tambor en a lo sumo un lote (de cualquier tipo)
-        for m in M:
-            asignado = [
-                y[tipo][l][m]
-                for tipo, slots in tipo_slots.items()
-                for l in slots
-                if m in y[tipo][l]
-            ]
-            if asignado:
-                model += pulp.lpSum(asignado) <= 1
-
-        # restricciones de kilos y propiedades por tipo-slot
-        for tipo, bounds in self.tipos.items():
-            mc = margenes_color.get(tipo)
-            for l in tipo_slots[tipo]:
-                elig_m = list(y[tipo][l].keys())
-                if not elig_m:
-                    model += x[tipo][l] == 0
-                    continue
-
-                kilos_l = pulp.lpSum(float(self.data["Kilos"].iloc[m]) * y[tipo][l][m] for m in elig_m)
-                model += kilos_l >= bounds["min"]["Kilos"] * x[tipo][l]
-                model += kilos_l <= bounds["max"]["Kilos"] * x[tipo][l]
-
-                n_batch = pulp.lpSum(y[tipo][l][m] for m in elig_m)
-
-                for p in bounds["labels"][1:]:
-                    if p not in self.data.columns:
-                        continue
-
-                    if p == color_col and mc is not None:
-                        # restricción IC: media simple <= effective_max
-                        color_sum = pulp.lpSum(float(self.data[p].iloc[m]) * y[tipo][l][m] for m in elig_m)
-                        model += color_sum <= mc["effective_max"] * n_batch
-                        model += color_sum >= mc["bound_min"] * n_batch
-                    else:
-                        # restricción estándar: media ponderada por kilos
-                        val_p = pulp.lpSum(
-                            float(self.data[p].iloc[m]) * float(self.data["Kilos"].iloc[m]) * y[tipo][l][m]
-                            for m in elig_m
-                        )
-                        model += val_p >= bounds["min"][p] * kilos_l
-                        model += val_p <= bounds["max"][p] * kilos_l
-
-        # solver: HiGHS primero, luego CBC externo, luego CBC bundled
-        self.gap = None
-        solved = False
-        for attempt in range(3):
-            try:
-                if attempt == 0:
-                    solver = pulp.HiGHS_CMD(msg=True, timeLimit=timeLimit, gapRel=0.005)
-                elif attempt == 1 and dirSolver:
-                    solver = pulp.COIN_CMD(path=dirSolver, msg=True, options=["sec", str(timeLimit)])
-                else:
-                    solver = pulp.PULP_CBC_CMD(msg=True, timeLimit=timeLimit)
-                model.solve(solver)
-                solved = True
-                break
-            except Exception:
-                continue
-
-        # extraer resultados
-        self.results = {}
-        if pulp.value(model.objective) is not None:
-            for tipo, slots in tipo_slots.items():
-                lotes = []
-                for l in slots:
-                    if x[tipo][l].varValue and x[tipo][l].varValue > 0.5:
-                        batch = [
-                            m for m in y[tipo][l]
-                            if y[tipo][l][m].varValue and y[tipo][l][m].varValue > 0.5
-                        ]
-                        if batch:
-                            lotes.append(batch)
-                if lotes:
-                    self.results[tipo] = lotes
-
-        # ordenar por posición (menos movimiento primero)
-        pos_col = self._positionColumn()
-        if pos_col:
-            def score(res):
-                bonus = 0
-                for lotes in res.values():
-                    for batch in lotes:
-                        all_cols = []
-                        for m in batch:
-                            all_cols.extend(self._parseColumnas(self.data[pos_col].iloc[m]))
-                        bonus += len(all_cols) - len(set(all_cols))
-                return bonus
-            # resultado único, pero guardamos el score para mostrarlo
-            self.rowScore = score(self.results)
+            [x[l] for l in LOTES]
+            + [y[l][m] for l in LOTES for m in MUESTRAS]
+        )  
+        
+        #restricción para que el modelo comience por el primer lote    
+        for l in LOTES[0:self.cntLotes-1]:
+            model += x[l] >= x[l+1]
+        
+        for l in LOTES:
+            #restriccion de correlacion entre variable binarias
+            for m in MUESTRAS:
+                model += x[l] >= y[l][m]
+        
+    
+        #Restriccion de que cada muestra pertenezca a un lote o a ninguno
+        for m in MUESTRAS:
+            model += pulp.lpSum([y[l][m] for l in LOTES] ) <= 1
+        
+        for l in LOTES:
+                kilos = sum([self.data["Kilos"][m] * y[l][m] for m in MUESTRAS])
+                model += kilos >= self.boundMin["Kilos"] * x[l], "Restricción kilos cota inferior lote"+str(l)
+                model += kilos <= self.boundMax["Kilos"] * x[l], "Restricción kilos cota superior lote"+str(l)
+                for p in self.boundsLabels[1::]:#a partir de 1 para no incluir kilos
+                    valueBound= sum([self.data[p][m] * y[l][m] * self.data["Kilos"][m] for m in MUESTRAS])
+                    #no se puede dividir por lo tanto paso kilos del lota como multiplicación del otro lado
+                    model += valueBound >= self.boundMin[p] * kilos, "Restricción propiedad " + p + " cota inferior lote"+str(l) 
+                    model += valueBound <= self.boundMax[p] * kilos, "Restricción propiedad " + p + " cota superior lote"+str(l)
+    
+        self.results = []
+        solver = None
+        if dirSolver != "":
+            solver = pulp.COIN_CMD(path=dirSolver, threads=1, mip=1, options=['sec','500'], fracGap=0.1, msg=1)
+            model.solve(solver)
         else:
-            self.rowScore = 0
+            model.solve()
 
-        return len(self.results)
+
+        accumOptimal = 0
+
+        if  pulp.LpStatus[model.status] == "Optimal":
+            opt = pulp.value(model.objective)
+            accumOptimal += 1
+            self.addResult(x, y)
+            while True:
+                model += pulp.lpSum([y[l][m] for l in LOTES for m in MUESTRAS if y[l][m] >= 0.99] ) <= sum( [y[l][m].varValue for l in LOTES for m in MUESTRAS]) - 1
+                
+                if dirSolver != "":
+                    model.solve(solver)
+                else:
+                    model.solve() 
+
+
+                if pulp.value(model.objective) >= opt - 1e-6:
+                    accumOptimal += 1
+                    self.results.append((x,y))
+                else:
+                    break
+    
+        return accumOptimal
 
     def getResults(self):
         return self.results
-
-    # ----------------------------------------------------------------- output
-
+ 
     def saveResultsToExcelDir(self, dirToSave):
-        if not self.results:
-            return
+    
+        LOTES = range(0, self.cntLotes)
+        MUESTRAS = range(0, self.cntMuestras)
+    
+        rowLabelsMuestras = self.data["Muestra"]
+        colLabelsMuestras = ["Lote " + str(num) for num in range(1, self.cntLotes+1)]
+        rowLabelsLotes = colLabelsMuestras 
+        colLabelsLotes = self.boundsLabels
+        cntParametros = len(self.boundsLabels)
+        matrizLoVal = np.zeros((self.cntLotes, cntParametros))
 
-        pos_col = self._positionColumn()
-        color_col = self._colorColumn()
-        writer = pd.ExcelWriter(dirToSave)
+        write = pd.ExcelWriter(dirToSave)
 
-        for tipo, lotes in self.results.items():
-            bounds = self.tipos[tipo]
-            rows_asig, rows_val = [], []
+        for i in range(len(self.results)):
+            (x, y) = self.results[i]
+            matriz = dict(zip(rowLabelsMuestras, y))
+            matrizMuLo = pd.DataFrame.from_dict(matriz, orient = "index", columns = colLabelsMuestras)
 
-            for i, batch in enumerate(lotes):
-                kilos_lote = sum(float(self.data["Kilos"].iloc[m]) for m in batch)
-                nombres = [str(self.data["Muestra"].iloc[m]) for m in batch]
+            for il,l in enumerate(LOTES):
+                if x[l]:
+                    kilosLote = sum([y[m][l] * self.data["Kilos"][m] for m in MUESTRAS])
+                    matrizLoVal[il,0] = kilosLote
+                    for ip, p in enumerate(self.boundsLabels[1::]):#a partir de 1 para no incluir kilos
+                        valorProp = sum([self.data[p][m] * y[m][l] * self.data["Kilos"][m] for m in MUESTRAS])/kilosLote
+                        matrizLoVal[il,ip + 1] = valorProp
+                    
+            matrizLoVal = dict(zip(rowLabelsLotes, np.round(matrizLoVal, 4)))
+            matrizLoVal = pd.DataFrame.from_dict(matrizLoVal, orient = "index", columns = colLabelsLotes)
+    
+            matrizMuLo.to_excel(write, sheet_name = "MuestrasLotes_" + str(i+1))
+            matrizLoVal.to_excel(write, sheet_name = "LotesValores_" + str(i+1))
+            write.save()
+    
 
-                row_asig = {"Lote": i + 1, "Tambores": ", ".join(nombres), "Kilos": round(kilos_lote, 1)}
-                if pos_col:
-                    cols_lote = set().union(*[self._parseColumnas(self.data[pos_col].iloc[m]) for m in batch])
-                    row_asig["Columnas"] = ", ".join(sorted(cols_lote))
-                rows_asig.append(row_asig)
 
-                row_val = {"Lote": i + 1, "Kilos": round(kilos_lote, 1)}
-                for p in bounds["labels"][1:]:
-                    if p not in self.data.columns:
-                        continue
-                    if p == color_col:
-                        # mostrar IC superior 99%
-                        ic = self._colorIC(batch)
-                        row_val[f"{p} (IC sup 99%)"] = round(ic, 4) if ic is not None else ""
-                    else:
-                        val = sum(
-                            float(self.data[p].iloc[m]) * float(self.data["Kilos"].iloc[m])
-                            for m in batch
-                        ) / kilos_lote
-                        row_val[p] = round(val, 4)
 
-                if pos_col:
-                    cols_used = len(set().union(*[self._parseColumnas(self.data[pos_col].iloc[m]) for m in batch]))
-                    row_val["Columnas utilizadas"] = cols_used
 
-                rows_val.append(row_val)
-
-            base = tipo[:14]
-            pd.DataFrame(rows_asig).to_excel(writer, sheet_name=f"{base}_Asignacion", index=False)
-            pd.DataFrame(rows_val).to_excel(writer, sheet_name=f"{base}_Valores", index=False)
-
-        writer.close()
+#miel = MielPulp()
+#miel.setDataFromDir("../archivos/DatosMuestras 200721.xlsx", "excel")
+#miel.setBoundsFromDir("../cotasPropiedades.xlsx", "excel")
+#miel.processModel()
+#miel.saveResultsToExcelDir("resultados.xlsx")
